@@ -33,6 +33,8 @@ export interface SaveData {
   botMatches: Record<string, number>;
   agentic: Record<string, BotMemory>;
   history: HistoryPoint[];
+  /** History points store table pools, not bench averages. Older saves omit this. */
+  poolHistory?: boolean;
   locked: boolean;
   lockReason: "match" | "hand" | null;
 }

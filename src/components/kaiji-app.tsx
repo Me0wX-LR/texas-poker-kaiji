@@ -424,7 +424,7 @@ function ExperimentPanel({
         <section className="rounded-xl border border-dashed p-4">
           <h3 className="text-base">No match has been scored</h3>
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-            Kaiji is still {formatElo(snap.kaijiElo)}, the same chair as the rest of the room. Deal at least one full match and the Elo lines will move. A rated match is 240 hands. If the hand total cuts a match short, that match is not rated.
+            Kaiji is still {formatElo(snap.kaijiElo)}, the same chair as the rest of the room. Deal at least one full match and the Elo lines will move. Those lines are table Elo: Kaiji&apos;s gains come out of the chairs that paid them, instead of vanishing into a bench average. A rated match is 240 hands. If the hand total cuts a match short, that match is not rated.
           </p>
         </section>
       ) : (
@@ -432,12 +432,15 @@ function ExperimentPanel({
           <section className="rounded-xl border bg-card p-4">
             <h3 className="text-base">Kaiji against the teams</h3>
             <p className="mb-2 text-xs text-muted-foreground">
-              Team lines are the average Elo of that team&apos;s bots who have already been rated. One variant sits per match, so a team line moves slower than Kaiji, who is a single rating.
+              Kaiji is one rating, so his result shows up in full. Each other line starts at 1,500 and stacks every point that team&apos;s seated players won or lost. A gain on Kaiji&apos;s line is a loss on theirs. Averaging the bench hid those losses, because hundreds of bots barely move.
             </p>
             <LineChart points={snap.history} lines={teamLines} empty="" />
           </section>
           <section className="rounded-xl border bg-card p-4">
             <h3 className="text-base">Kaiji against the four tiers</h3>
+            <p className="mb-2 text-xs text-muted-foreground">
+              Same stacking by style. Two GTO seats in one match both land on the GTO line. Across a match the Elo changes still sum to zero. The bench average of bots who have sat stays near the start: GTO {formatElo(snap.benchTiers.gto)}, dynamic {formatElo(snap.benchTiers.dynamic)}, frozen {formatElo(snap.benchTiers.frozen)}, adapters {formatElo(snap.benchTiers.agentic)}.
+            </p>
             <LineChart points={snap.history} lines={tierLines} empty="" />
           </section>
           <section className="rounded-xl border bg-card p-4">
@@ -464,7 +467,7 @@ function ExperimentPanel({
                 <thead className="text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="py-1 pr-3 font-medium">Who</th>
-                    <th className="py-1 pr-3 font-medium">Elo</th>
+                    <th className="py-1 pr-3 font-medium">Table Elo</th>
                     <th className="py-1 pr-3 font-medium">Versus Kaiji</th>
                     <th className="py-1 font-medium">Chips</th>
                   </tr>

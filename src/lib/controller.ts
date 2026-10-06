@@ -14,7 +14,7 @@ import {
   formatMatchTime,
 } from "./constants";
 import { eloUpdates, placementScores } from "./elo";
-import { Field, generateField, teamMeans, teamName, tierMeans, validateField } from "./field";
+import { Field, generateField, teamName, teamPools, tierMeans, tierPools, validateField } from "./field";
 import { HandMachine, HandResult, playHand } from "./hand";
 import { kaijiDecision } from "./kaiji";
 import { SeatCard, drawSeats } from "./match";
@@ -92,6 +92,7 @@ export interface SimSnap {
   kaijiChips: number;
   tierChips: Record<Tier, number>;
   tiers: Record<Tier, number>;
+  benchTiers: Record<Tier, number>;
   teamElos: number[];
   teamNames: string[];
   history: HistoryPoint[];
@@ -243,8 +244,9 @@ export class SimController {
   }
 
   snapshot(): SimSnap {
-    const tiers = this.field ? tierMeans(this.field.bots) : { gto: INITIAL_ELO, dynamic: INITIAL_ELO, frozen: INITIAL_ELO, agentic: INITIAL_ELO };
-    const teamElos = this.field ? teamMeans(this.field, this.kaijiElo) : [this.kaijiElo];
+    const tiers = this.field ? tierPools(this.field.bots) : { gto: INITIAL_ELO, dynamic: INITIAL_ELO, frozen: INITIAL_ELO, agentic: INITIAL_ELO };
+    const benchTiers = this.field ? tierMeans(this.field.bots) : tiers;
+    const teamElos = this.field ? teamPools(this.field, this.kaijiElo) : [this.kaijiElo];
     const teamNames = this.field ? Array.from({ length: this.field.teamCount }, (_, i) => teamName(i)) : ["Kaiji"];
     return {
       phase: !this.booted ? "loading" : this.error ? "error" : "ready",
@@ -268,6 +270,7 @@ export class SimController {
       kaijiChips: this.kaijiChips,
       tierChips: { ...this.tierChips },
       tiers,
+      benchTiers,
       teamElos,
       teamNames,
       history: this.history,
@@ -425,7 +428,7 @@ export class SimController {
     this.kaijiChips = saved.kaijiChips;
     this.tierChips = { ...saved.tierChips };
     this.teamChips = saved.teamChips.slice();
-    this.history = saved.history;
+    this.history = saved.poolHistory ? saved.history : this.matchesCompleted > 0 ? [this.historyPoint()] : [];
     this.locked = saved.locked;
     this.lockReason = saved.lockReason;
     this.restored = saved.matchesCompleted > 0 || saved.locked;
@@ -616,6 +619,18 @@ export class SimController {
     if (this.handsPlayed >= this.handDeadline) this.lock("hand");
   }
 
+  private historyPoint(): HistoryPoint {
+    return {
+      match: this.matchesCompleted,
+      hands: this.handsPlayed,
+      kaiji: this.kaijiElo,
+      teams: this.field ? teamPools(this.field, this.kaijiElo) : [this.kaijiElo],
+      tiers: this.field ? tierPools(this.field.bots) : { gto: INITIAL_ELO, dynamic: INITIAL_ELO, frozen: INITIAL_ELO, agentic: INITIAL_ELO },
+      kaijiChips: this.kaijiChips,
+      tierChips: { ...this.tierChips },
+    };
+  }
+
   private finishMatch(): void {
     const live = this.live;
     if (!live || !this.field) return;
@@ -635,15 +650,7 @@ export class SimController {
     }
     if (kaijiPlayed) this.kaijiMatches++;
     this.matchesCompleted++;
-    this.history.push({
-      match: this.matchesCompleted,
-      hands: this.handsPlayed,
-      kaiji: this.kaijiElo,
-      teams: teamMeans(this.field, this.kaijiElo),
-      tiers: tierMeans(this.field.bots),
-      kaijiChips: this.kaijiChips,
-      tierChips: { ...this.tierChips },
-    });
+    this.history.push(this.historyPoint());
     this.live = null;
     this.persist();
     if (this.matchesCompleted >= this.matchDeadline) this.lock("match");
@@ -691,6 +698,7 @@ export class SimController {
       botMatches,
       agentic,
       history: this.history,
+      poolHistory: true,
       locked: this.locked,
       lockReason: this.lockReason,
     };

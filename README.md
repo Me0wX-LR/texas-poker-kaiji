@@ -31,7 +31,7 @@ The slides fix six-max Hold'em, standard hand ranks, split pots, hidden hole car
 
 Everyone in this sim starts at 1,500. Place score for six players is `(6 − place) / 5`. Ties split the average of the tied place scores. Expected score is the mean of logistic expectations against each opponent (base 10, divisor 400). `K = 32`. The slides illustrate that formula from 1,760: a win against a 1,560 opponent is about +7.69, which rounds to their +8. Their +17 against a 1,960 is an illustration; this K is about +24. A ladder saved under the old 1,760 baseline is discarded on load so a reload opens at 1,500.
 
-Odd chips in a split go to the first winner left of the button. A short all-in reopens betting. Team lines on the chart are the mean Elo of that team's bots who have already played a rated match. Tier lines are the same idea by archetype. Variant Elo, not a separate team rating, is what a dynamic bot reads.
+Odd chips in a split go to the first winner left of the button. A short all-in reopens betting. The Elo update is zero-sum at the table. Kaiji is one rating. Each team line and each tier line is 1,500 plus the sum of what that group's seated players won or lost, so a rise for Kaiji shows up as a drop for the chairs that paid it. The average of the bench stays near the start, because each bot only sits occasionally. Variant Elo, not that stacked line, is what a dynamic bot reads.
 
 Team 1 is Kaiji and only plays the fixed chart. Each match seats six of the teams and rotates who sits out. Each other seat draws one variant for all 240 hands.
 

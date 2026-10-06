@@ -1,6 +1,6 @@
 import { cardCode, categoryOf, evaluateCards, handStrength } from "../src/lib/eval";
 import { eloUpdates, expectedScore, placementScores } from "../src/lib/elo";
-import { botSignature, generateField, teamName } from "../src/lib/field";
+import { botSignature, generateField, teamName, teamPools, tierPools } from "../src/lib/field";
 import { HandMachine, playHand, type Decision } from "../src/lib/hand";
 import { kaijiDecision, kaijiPostflopShove, kaijiPreflopShove } from "../src/lib/kaiji";
 import { playRatedMatch } from "../src/lib/match";
@@ -183,10 +183,17 @@ const rated = playRatedMatch({
 const dt = performance.now() - t0;
 check("match is 240 hands and rated", rated.rated && rated.hands === HANDS_PER_MATCH, `${rated.hands} in ${dt.toFixed(0)}ms`);
 check("nets sum to zero", Math.abs(rated.nets.reduce((a, b) => a + b, 0)) < 1e-6, rated.nets.join(","));
-  check(
-    "a rating moved",
-    rated.seats.some((seat) => Math.abs((seat.bot ? seat.bot.elo : rated.nextKaijiElo) - INITIAL_ELO) > 0.001),
-  );
+check(
+  "a rating moved",
+  rated.seats.some((seat) => Math.abs((seat.bot ? seat.bot.elo : rated.nextKaijiElo) - INITIAL_ELO) > 0.001),
+);
+const eloDrift = field.bots.reduce((sum, bot) => sum + (bot.elo - INITIAL_ELO), rated.nextKaijiElo - INITIAL_ELO);
+check("table elo is zero-sum", Math.abs(eloDrift) < 1e-4, String(eloDrift));
+const pools = tierPools(field.bots);
+const tierDrift = pools.gto + pools.dynamic + pools.frozen + pools.agentic - 4 * INITIAL_ELO;
+check("tier lines hold the field's losses", Math.abs(tierDrift + (rated.nextKaijiElo - INITIAL_ELO)) < 1e-4, String(tierDrift));
+const teamDrift = teamPools(field, rated.nextKaijiElo).reduce((sum, elo) => sum + (elo - INITIAL_ELO), 0);
+check("team lines hold the same losses", Math.abs(teamDrift) < 1e-4, String(teamDrift));
 const buttons = new Array(6).fill(0);
 for (let h = 0; h < 240; h++) buttons[h % 6]++;
 check("button rotates evenly", buttons.every((n) => n === 40));

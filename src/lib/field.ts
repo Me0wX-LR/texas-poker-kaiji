@@ -232,6 +232,18 @@ export function tierMeans(bots: readonly Bot[]): Record<Tier, number> {
   };
 }
 
+/** 1,500 plus every point this tier's seated bots have won or lost. Not a bench average. */
+export function tierPools(bots: readonly Bot[]): Record<Tier, number> {
+  const delta: Record<Tier, number> = { gto: 0, dynamic: 0, frozen: 0, agentic: 0 };
+  for (const bot of bots) delta[bot.tier] += bot.elo - INITIAL_ELO;
+  return {
+    gto: INITIAL_ELO + delta.gto,
+    dynamic: INITIAL_ELO + delta.dynamic,
+    frozen: INITIAL_ELO + delta.frozen,
+    agentic: INITIAL_ELO + delta.agentic,
+  };
+}
+
 export function teamMeans(field: Field, kaijiElo: number): number[] {
   const means = [kaijiElo];
   for (let team = 1; team < field.teamCount; team++) {
@@ -245,4 +257,15 @@ export function teamMeans(field: Field, kaijiElo: number): number[] {
     means.push(count ? sum / count : INITIAL_ELO);
   }
   return means;
+}
+
+/** 1,500 plus every point that team's seated bots have won or lost. Kaiji stays his own rating. */
+export function teamPools(field: Field, kaijiElo: number): number[] {
+  const pools = [kaijiElo];
+  for (let team = 1; team < field.teamCount; team++) {
+    let delta = 0;
+    for (const bot of field.rosters[team]) delta += bot.elo - INITIAL_ELO;
+    pools.push(INITIAL_ELO + delta);
+  }
+  return pools;
 }
