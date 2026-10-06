@@ -80,6 +80,14 @@ const AGENT_STYLES: Style[] = [
   { personality: "Mimic", open: 0.48, call: 0.38, three: 0.6, shove: 0.5, bluff: 0.12, agg: 1.1, bet: 0.52, value: 0.01, pos: 0.7 },
 ];
 
+/** Style buckets and the personalities inside them. Heads-up draws one player from a chosen row. */
+export const PRACTICE_GROUPS: { tier: Tier; personalities: string[] }[] = [
+  { tier: "gto", personalities: [GTO_STYLE.personality] },
+  { tier: "dynamic", personalities: DYNAMIC_STYLES.map((style) => style.personality) },
+  { tier: "frozen", personalities: FROZEN_STYLES.map((style) => style.personality) },
+  { tier: "agentic", personalities: AGENT_STYLES.map((style) => style.personality) },
+];
+
 /** How many bots in the field are Kaiji. A whole percent of the population, from the start. */
 export function kaijiPopulationCount(botCount: number, share: number): number {
   const pct = Math.max(0, Math.min(100, Math.round(Number.isFinite(share) ? share : 0)));

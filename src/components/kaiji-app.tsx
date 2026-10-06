@@ -272,7 +272,7 @@ export function KaijiApp() {
           <ExperimentPanel snap={snap} tierLines={tierLines} chipLines={chipLines} query={query} setQuery={setQuery} hits={hits} />
         </TabsContent>
         <TabsContent value="heads" className="mt-3">
-          <HeadsUp blinds={snap.blinds} />
+          <HeadsUp blinds={snap.blinds} pickOpponent={(pool) => simRef.current?.practiceOpponent(pool) ?? null} />
         </TabsContent>
         <TabsContent value="rules" className="mt-3">
           <RulesPanel />
@@ -696,7 +696,7 @@ function RulesPanel() {
       <section className="rounded-xl border bg-card p-4">
         <h2 className="text-base">Who else is in the room</h2>
         <p className="mt-2 text-muted-foreground">
-          The field is individual players, at least a thousand of them. There are no teams. Four styles share that field: a fast GTO-style chart, dynamic bots whose tightness and aggression move with their own Elo and the table&apos;s Elo, frozen personalities fixed at creation, and adapters that rewrite thresholds from showdown rate, fold-to-shove, and aggression they actually saw. Each match draws Kaiji plus five of those players for all 240 hands. The ladder ranks each player by their own Elo. Win rate is the share of rated matches in which Kaiji tied or took the best chip result. Heads-up is a side game and does not touch these ratings. Ratings stay in localStorage.
+          The field is individual players, at least a thousand of them. There are no teams. Four styles share that field: a fast GTO-style chart, dynamic bots whose tightness and aggression move with their own Elo and the table&apos;s Elo, frozen personalities fixed at creation, and adapters that rewrite thresholds from showdown rate, fold-to-shove, and aggression they actually saw. Each match draws Kaiji plus five of those players for all 240 hands. The ladder ranks each player by their own Elo. Win rate is the share of rated matches in which Kaiji tied or took the best chip result. Heads-up is a side game: random matchmaking, Kaiji, or one player drawn from a style or personality. It does not touch these ratings. Ratings stay in localStorage.
         </p>
       </section>
       <section className="rounded-xl border bg-card p-4">

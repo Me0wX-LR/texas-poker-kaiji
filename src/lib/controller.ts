@@ -18,7 +18,7 @@ import { Field, applyKaijiPopulation, generateField, teamMeans, teamName, teamPo
 import { HandMachine, HandResult, playHand } from "./hand";
 import { kaijiDecision } from "./kaiji";
 import { SeatCard, drawSeats } from "./match";
-import { decideBot, learnFromHand } from "./policy";
+import { decideBot, learnFromHand, type Bot } from "./policy";
 import { Rng, hashString } from "./rng";
 import { HistoryPoint, SaveData, clearSave, loadSave, writeSave } from "./storage";
 
@@ -51,6 +51,59 @@ export interface TableSnap {
   matchNets: number[];
   matchHands: number;
   matchIndex: number;
+}
+
+export type PracticePool = "random" | "kaiji" | "kaiji-chart" | Tier | `style:${string}`;
+
+export interface PracticeSeat {
+  name: string;
+  style: string;
+  personality: string;
+  usesKaiji: boolean;
+  bot: Bot | null;
+}
+
+/** Draw one field player for a practice seat. `roll` is in [0, 1). Kaiji himself is not in the field. */
+export function selectPracticeBot(bots: Bot[], pool: PracticePool, roll: number): Bot | "kaiji" | null {
+  if (pool === "kaiji") return "kaiji";
+  let choices = bots;
+  if (pool === "kaiji-chart") choices = bots.filter((bot) => bot.playsKaiji);
+  else if (pool.startsWith("style:")) {
+    const personality = pool.slice("style:".length);
+    choices = bots.filter((bot) => !bot.playsKaiji && bot.params.personality === personality);
+  } else if (pool !== "random") {
+    choices = bots.filter((bot) => bot.tier === pool && !bot.playsKaiji);
+  }
+  if (choices.length === 0) return null;
+  const index = Math.min(choices.length - 1, Math.max(0, Math.floor(roll * choices.length)));
+  return choices[index];
+}
+
+function copyBot(bot: Bot): Bot {
+  return {
+    ...bot,
+    params: {
+      ...bot.params,
+      open: bot.params.open.slice(),
+      call: bot.params.call.slice(),
+      threeBet: bot.params.threeBet.slice(),
+    },
+    memory: { ...bot.memory },
+  };
+}
+
+function seatFromPick(pick: Bot | "kaiji"): PracticeSeat {
+  if (pick === "kaiji") {
+    return { name: "Kaiji", style: "Kaiji", personality: "Static chart", usesKaiji: true, bot: null };
+  }
+  const usesKaiji = pick.playsKaiji;
+  return {
+    name: pick.name,
+    style: usesKaiji ? "Kaiji chart" : TIER_LABEL[pick.tier],
+    personality: pick.params.personality,
+    usesKaiji,
+    bot: usesKaiji ? null : copyBot(pick),
+  };
 }
 
 export interface BotHit {
@@ -251,6 +304,12 @@ export class SimController {
     this.applyNew(clean, DEFAULT_TEAMS, botCount, true);
     this.emit();
     return null;
+  }
+
+  practiceOpponent(pool: PracticePool): PracticeSeat | null {
+    if (!this.field && pool !== "kaiji") return null;
+    const pick = selectPracticeBot(this.field?.bots ?? [], pool, Math.random());
+    return pick ? seatFromPick(pick) : null;
   }
 
   findBots(query: string): BotHit[] {

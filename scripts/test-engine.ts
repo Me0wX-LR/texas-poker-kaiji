@@ -1,6 +1,7 @@
 import { cardCode, categoryOf, evaluateCards, handStrength } from "../src/lib/eval";
 import { eloUpdates, expectedScore, placementScores } from "../src/lib/elo";
-import { botSignature, generateField, teamName, teamPools, tierPools } from "../src/lib/field";
+import { applyKaijiPopulation, botSignature, generateField, teamName, teamPools, tierPools } from "../src/lib/field";
+import { selectPracticeBot } from "../src/lib/controller";
 import { HandMachine, playHand, type Decision } from "../src/lib/hand";
 import { kaijiDecision, kaijiPostflopShove, kaijiPreflopShove } from "../src/lib/kaiji";
 import { playRatedMatch } from "../src/lib/match";
@@ -203,6 +204,30 @@ const fieldB = generateField("repeat", 7, 1000);
 const runA = playRatedMatch({ field: fieldA, matchIndex: 3, kaijiElo: 1760, blinds: false, rng: new Rng(7) });
 const runB = playRatedMatch({ field: fieldB, matchIndex: 3, kaijiElo: 1760, blinds: false, rng: new Rng(7) });
 check("same seed repeats the match", runA.nets.join() === runB.nets.join() && runA.nextKaijiElo === runB.nextKaijiElo);
+
+const practice = generateField("practice", 7, 1000);
+applyKaijiPopulation(practice, 10);
+const kaijiSeat = selectPracticeBot(practice.bots, "kaiji", 0);
+check("practice kaiji is the chart", kaijiSeat === "kaiji");
+const tag = selectPracticeBot(practice.bots, "style:TAG", 0);
+check(
+  "practice type is that personality",
+  tag !== null && tag !== "kaiji" && tag.params.personality === "TAG" && tag.tier === "frozen" && !tag.playsKaiji,
+);
+const anyFrozen = selectPracticeBot(practice.bots, "frozen", 0.999);
+check(
+  "practice style stays in the style",
+  anyFrozen !== null && anyFrozen !== "kaiji" && anyFrozen.tier === "frozen" && !anyFrozen.playsKaiji,
+);
+const chart = selectPracticeBot(practice.bots, "kaiji-chart", 0);
+check("practice chart copy plays kaiji", chart !== null && chart !== "kaiji" && chart.playsKaiji);
+const empty = selectPracticeBot(practice.bots.map((bot) => ({ ...bot, playsKaiji: false })), "kaiji-chart", 0);
+check("empty practice pool draws nobody", empty === null);
+const randomPick = selectPracticeBot(practice.bots, "random", 0);
+check("random practice draw is a field player", randomPick !== null && randomPick !== "kaiji");
+const eloBefore = practice.bots.map((bot) => bot.elo);
+selectPracticeBot(practice.bots, "random", 0.5);
+check("practice draw leaves ratings", practice.bots.every((bot, i) => bot.elo === eloBefore[i]));
 
 console.log(`match pace ${((HANDS_PER_MATCH / dt) * 1000).toFixed(0)} hands/sec`);
 if (failed) {
