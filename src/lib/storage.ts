@@ -35,6 +35,8 @@ export interface SaveData {
   history: HistoryPoint[];
   /** History points store table pools, not bench averages. Older saves omit this. */
   poolHistory?: boolean;
+  /** Tier and team lines are average ratings, not the sum of a whole group. */
+  meanHistory?: boolean;
   locked: boolean;
   lockReason: "match" | "hand" | null;
 }

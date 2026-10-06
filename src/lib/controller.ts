@@ -14,7 +14,7 @@ import {
   formatMatchTime,
 } from "./constants";
 import { eloUpdates, placementScores } from "./elo";
-import { Field, generateField, teamName, teamPools, tierMeans, tierPools, validateField } from "./field";
+import { Field, generateField, teamMeans, teamName, teamPools, tierMeans, tierPools, validateField } from "./field";
 import { HandMachine, HandResult, playHand } from "./hand";
 import { kaijiDecision } from "./kaiji";
 import { SeatCard, drawSeats } from "./match";
@@ -93,7 +93,10 @@ export interface SimSnap {
   tierChips: Record<Tier, number>;
   tiers: Record<Tier, number>;
   benchTiers: Record<Tier, number>;
+  /** 1,500 plus the sum of that tier's Elo changes. A group total, not a rating. */
+  tierPiles: Record<Tier, number>;
   teamElos: number[];
+  teamPiles: number[];
   teamNames: string[];
   history: HistoryPoint[];
   table: TableSnap | null;
@@ -244,9 +247,10 @@ export class SimController {
   }
 
   snapshot(): SimSnap {
-    const tiers = this.field ? tierPools(this.field.bots) : { gto: INITIAL_ELO, dynamic: INITIAL_ELO, frozen: INITIAL_ELO, agentic: INITIAL_ELO };
-    const benchTiers = this.field ? tierMeans(this.field.bots) : tiers;
-    const teamElos = this.field ? teamPools(this.field, this.kaijiElo) : [this.kaijiElo];
+    const tiers = this.field ? tierMeans(this.field.bots) : { gto: INITIAL_ELO, dynamic: INITIAL_ELO, frozen: INITIAL_ELO, agentic: INITIAL_ELO };
+    const tierPiles = this.field ? tierPools(this.field.bots) : tiers;
+    const teamElos = this.field ? teamMeans(this.field, this.kaijiElo) : [this.kaijiElo];
+    const teamPiles = this.field ? teamPools(this.field, this.kaijiElo) : [this.kaijiElo];
     const teamNames = this.field ? Array.from({ length: this.field.teamCount }, (_, i) => teamName(i)) : ["Kaiji"];
     return {
       phase: !this.booted ? "loading" : this.error ? "error" : "ready",
@@ -270,8 +274,10 @@ export class SimController {
       kaijiChips: this.kaijiChips,
       tierChips: { ...this.tierChips },
       tiers,
-      benchTiers,
+      benchTiers: tiers,
+      tierPiles,
       teamElos,
+      teamPiles,
       teamNames,
       history: this.history,
       table: this.tableSnap(),
@@ -428,7 +434,7 @@ export class SimController {
     this.kaijiChips = saved.kaijiChips;
     this.tierChips = { ...saved.tierChips };
     this.teamChips = saved.teamChips.slice();
-    this.history = saved.poolHistory ? saved.history : this.matchesCompleted > 0 ? [this.historyPoint()] : [];
+    this.history = saved.meanHistory ? saved.history : this.matchesCompleted > 0 ? [this.historyPoint()] : [];
     this.locked = saved.locked;
     this.lockReason = saved.lockReason;
     this.restored = saved.matchesCompleted > 0 || saved.locked;
@@ -517,9 +523,9 @@ export class SimController {
       ctx.oppAvgElo = card.oppAvg;
     }
     if (ctx.facingShove) this.faced[seat] = true;
-    const decision = card.bot
-      ? decideBot(card.bot, ctx, () => this.rng.next())
-      : kaijiDecision(ctx.hole0, ctx.hole1, ctx.board, ctx.street, ctx.toCall);
+    const decision = !card.bot || card.asKaiji
+      ? kaijiDecision(ctx.hole0, ctx.hole1, ctx.board, ctx.street, ctx.toCall)
+      : decideBot(card.bot, ctx, () => this.rng.next());
     if (decision.act === "fold" && ctx.facingShove) this.foldedTo[seat] = true;
     if (decision.act === "bet" || decision.act === "raise" || decision.act === "allin") this.agg++;
     else this.passive++;
@@ -560,7 +566,7 @@ export class SimController {
       keepLog: false,
       decide: (seat, ctx) => {
         const card = live.seats[seat];
-        if (!card.bot) return kaijiDecision(ctx.hole0, ctx.hole1, ctx.board, ctx.street, ctx.toCall);
+        if (!card.bot || card.asKaiji) return kaijiDecision(ctx.hole0, ctx.hole1, ctx.board, ctx.street, ctx.toCall);
         ctx.ownElo = card.elo;
         ctx.oppAvgElo = card.oppAvg;
         return decideBot(card.bot, ctx, () => this.rng.next());
@@ -581,7 +587,7 @@ export class SimController {
       this.lock("hand");
       return false;
     }
-    const seats = drawSeats(this.field!, this.matchesCompleted, this.kaijiElo, this.rng);
+    const seats = drawSeats(this.field!, this.kaijiElo, this.rng);
     this.previewSeats = seats;
     this.live = { index: this.matchesCompleted, handsDone: 0, nets: [0, 0, 0, 0, 0, 0], seats };
     return true;
@@ -600,6 +606,7 @@ export class SimController {
       else {
         this.tierChips[card.bot.tier] += result.nets[i];
         this.teamChips[card.team] += result.nets[i];
+        if (card.asKaiji) continue;
         learnFromHand(card.bot, {
           showdown: result.showdown && !result.folded[i],
           facedShove: result.facedShove[i],
@@ -624,8 +631,8 @@ export class SimController {
       match: this.matchesCompleted,
       hands: this.handsPlayed,
       kaiji: this.kaijiElo,
-      teams: this.field ? teamPools(this.field, this.kaijiElo) : [this.kaijiElo],
-      tiers: this.field ? tierPools(this.field.bots) : { gto: INITIAL_ELO, dynamic: INITIAL_ELO, frozen: INITIAL_ELO, agentic: INITIAL_ELO },
+      teams: this.field ? teamMeans(this.field, this.kaijiElo) : [this.kaijiElo],
+      tiers: this.field ? tierMeans(this.field.bots) : { gto: INITIAL_ELO, dynamic: INITIAL_ELO, frozen: INITIAL_ELO, agentic: INITIAL_ELO },
       kaijiChips: this.kaijiChips,
       tierChips: { ...this.tierChips },
     };
@@ -699,6 +706,7 @@ export class SimController {
       agentic,
       history: this.history,
       poolHistory: true,
+      meanHistory: true,
       locked: this.locked,
       lockReason: this.lockReason,
     };

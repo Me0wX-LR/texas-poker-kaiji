@@ -424,7 +424,7 @@ function ExperimentPanel({
         <section className="rounded-xl border border-dashed p-4">
           <h3 className="text-base">No match has been scored</h3>
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-            Kaiji is still {formatElo(snap.kaijiElo)}, the same chair as the rest of the room. Deal at least one full match and the Elo lines will move. Those lines are table Elo: Kaiji&apos;s gains come out of the chairs that paid them, instead of vanishing into a bench average. A rated match is 240 hands. If the hand total cuts a match short, that match is not rated.
+            Kaiji is still {formatElo(snap.kaijiElo)}, the same chair as the rest of the room. Deal at least one full match and the Elo lines will move. Each style line is the average rating of players of that style who have sat, not a pile of all of them added together. A rated match is 240 hands. If the hand total cuts a match short, that match is not rated.
           </p>
         </section>
       ) : (
@@ -432,21 +432,21 @@ function ExperimentPanel({
           <section className="rounded-xl border bg-card p-4">
             <h3 className="text-base">Kaiji against the teams</h3>
             <p className="mb-2 text-xs text-muted-foreground">
-              Kaiji is one rating, so his result shows up in full. Each other line starts at 1,500 and stacks every point that team&apos;s seated players won or lost. A gain on Kaiji&apos;s line is a loss on theirs. Averaging the bench hid those losses, because hundreds of bots barely move.
+              Every line is one rating. Kaiji is himself. Each other line is the average rating of that team&apos;s players who have already sat a rated match. A team does not get to add every member&apos;s Elo change into one score.
             </p>
             <LineChart points={snap.history} lines={teamLines} empty="" />
           </section>
           <section className="rounded-xl border bg-card p-4">
             <h3 className="text-base">Kaiji against the four tiers</h3>
             <p className="mb-2 text-xs text-muted-foreground">
-              Same stacking by style. Two GTO seats in one match both land on the GTO line. Across a match the Elo changes still sum to zero. The bench average of bots who have sat stays near the start: GTO {formatElo(snap.benchTiers.gto)}, dynamic {formatElo(snap.benchTiers.dynamic)}, frozen {formatElo(snap.benchTiers.frozen)}, adapters {formatElo(snap.benchTiers.agentic)}.
+              Each line is the average Elo of players of that style who have sat. GTO-style and Dynamic-by-Elo looked much faster before because the chart added every one of their Elo changes into a single number and drew it on Kaiji&apos;s scale. There are 300 of each. Kaiji is one player, so only his own change hits his line. Right now those averages are GTO {formatElo(snap.tiers.gto)}, dynamic {formatElo(snap.tiers.dynamic)}, frozen {formatElo(snap.tiers.frozen)}, adapters {formatElo(snap.tiers.agentic)}. The group piles, which are not ratings, are GTO {formatElo(snap.tierPiles.gto)}, dynamic {formatElo(snap.tierPiles.dynamic)}, frozen {formatElo(snap.tierPiles.frozen)}, adapters {formatElo(snap.tierPiles.agentic)}.
             </p>
             <LineChart points={snap.history} lines={tierLines} empty="" />
           </section>
           <section className="rounded-xl border bg-card p-4">
             <h3 className="text-base">Cumulative chips</h3>
             <p className="mb-2 text-xs text-muted-foreground">
-              Chips are the slide&apos;s score: end stack minus 10,000, summed over hands. Tier lines add every seated bot of that tier, so they cover five seats most matches and swing harder than Kaiji.
+              Chips are the slide&apos;s score: end stack minus 10,000, summed over hands. A tier line adds every seat of that style, so two GTO players in one match both count. That group total can rise faster than Kaiji even when each of those players is an ordinary rating.
             </p>
             <LineChart points={snap.history} lines={chipLines} empty="" />
           </section>
@@ -467,8 +467,9 @@ function ExperimentPanel({
                 <thead className="text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="py-1 pr-3 font-medium">Who</th>
-                    <th className="py-1 pr-3 font-medium">Table Elo</th>
+                    <th className="py-1 pr-3 font-medium">Average Elo</th>
                     <th className="py-1 pr-3 font-medium">Versus Kaiji</th>
+                    <th className="py-1 pr-3 font-medium">Group pile</th>
                     <th className="py-1 font-medium">Chips</th>
                   </tr>
                 </thead>
@@ -476,6 +477,7 @@ function ExperimentPanel({
                   <tr className="border-t">
                     <td className="py-2 pr-3">Kaiji</td>
                     <td className="py-2 pr-3 tabular-nums">{formatElo(snap.kaijiElo)}</td>
+                    <td className="py-2 pr-3">—</td>
                     <td className="py-2 pr-3">—</td>
                     <td className="py-2 tabular-nums">{formatChips(snap.kaijiChips)}</td>
                   </tr>
@@ -486,6 +488,7 @@ function ExperimentPanel({
                       <td className="py-2 pr-3">
                         {row.result === "ahead" ? `Kaiji ahead by ${row.delta}` : row.result === "behind" ? `Kaiji behind by ${Math.abs(row.delta)}` : "Level"}
                       </td>
+                      <td className="py-2 pr-3 tabular-nums">{formatElo(snap.tierPiles[row.tier])}</td>
                       <td className="py-2 tabular-nums">{formatChips(snap.tierChips[row.tier])}</td>
                     </tr>
                   ))}

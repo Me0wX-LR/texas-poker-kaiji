@@ -11,6 +11,8 @@ export interface SeatCard {
   bot: Bot | null;
   elo: number;
   oppAvg: number;
+  /** This chair plays the static Kaiji chart for the match. The real Kaiji is always on it. */
+  asKaiji: boolean;
 }
 
 export function seatedTeams(matchIndex: number, teamCount: number): number[] {
@@ -20,14 +22,16 @@ export function seatedTeams(matchIndex: number, teamCount: number): number[] {
   return seats;
 }
 
-export function drawSeats(field: Field, matchIndex: number, kaijiElo: number, rng: Rng): SeatCard[] {
-  const teams = seatedTeams(matchIndex, field.teamCount);
-  const seats: SeatCard[] = teams.map((team) => {
-    if (team === 0) return { team, bot: null, elo: kaijiElo, oppAvg: 0 };
-    const roster = field.rosters[team];
-    const bot = roster[rng.int(roster.length)];
-    return { team, bot, elo: bot.elo, oppAvg: 0 };
-  });
+export function drawSeats(field: Field, kaijiElo: number, rng: Rng): SeatCard[] {
+  const seats: SeatCard[] = [{ team: 0, bot: null, elo: kaijiElo, oppAvg: 0, asKaiji: true }];
+  const used = new Set<number>();
+  while (seats.length < 6) {
+    const index = rng.int(field.bots.length);
+    if (used.has(index)) continue;
+    used.add(index);
+    const bot = field.bots[index];
+    seats.push({ team: bot.team, bot, elo: bot.elo, oppAvg: 0, asKaiji: bot.playsKaiji });
+  }
   for (let i = 0; i < seats.length; i++) {
     let sum = 0;
     for (let j = 0; j < seats.length; j++) if (j !== i) sum += seats[j].elo;
@@ -54,7 +58,7 @@ export function playRatedMatch(options: {
   handLimit?: number;
   onHand?: (handIndex: number, result: HandResult, seats: SeatCard[]) => void;
 }): RatedMatch {
-  const seats = drawSeats(options.field, options.matchIndex, options.kaijiElo, options.rng);
+  const seats = drawSeats(options.field, options.kaijiElo, options.rng);
   const nets = [0, 0, 0, 0, 0, 0];
   const limit = options.handLimit ?? HANDS_PER_MATCH;
   let hands = 0;
@@ -67,7 +71,7 @@ export function playRatedMatch(options: {
       keepLog: false,
       decide: (seat, ctx) => {
         const card = seats[seat];
-        if (!card.bot) return kaijiDecision(ctx.hole0, ctx.hole1, ctx.board, ctx.street, ctx.toCall);
+        if (!card.bot || card.asKaiji) return kaijiDecision(ctx.hole0, ctx.hole1, ctx.board, ctx.street, ctx.toCall);
         ctx.ownElo = card.elo;
         ctx.oppAvgElo = card.oppAvg;
         return decideBot(card.bot, ctx, () => options.rng.next());
@@ -76,7 +80,7 @@ export function playRatedMatch(options: {
     for (let i = 0; i < 6; i++) nets[i] += result.nets[i];
     for (let i = 0; i < 6; i++) {
       const bot = seats[i].bot;
-      if (!bot) continue;
+      if (!bot || seats[i].asKaiji) continue;
       learnFromHand(bot, {
         showdown: result.showdown && !result.folded[i],
         facedShove: result.facedShove[i],

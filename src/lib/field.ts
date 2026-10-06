@@ -80,6 +80,31 @@ const AGENT_STYLES: Style[] = [
   { personality: "Mimic", open: 0.48, call: 0.38, three: 0.6, shove: 0.5, bluff: 0.12, agg: 1.1, bet: 0.52, value: 0.01, pos: 0.7 },
 ];
 
+/** How many bots in the field are Kaiji. A whole percent of the population, from the start. */
+export function kaijiPopulationCount(botCount: number, share: number): number {
+  const pct = Math.max(0, Math.min(100, Math.round(Number.isFinite(share) ? share : 0)));
+  return Math.round((botCount * pct) / 100);
+}
+
+/**
+ * Mark exactly that percent of this field as Kaiji. The same seed and percent
+ * always pick the same players, and a smaller percent is a subset of a larger one.
+ */
+export function applyKaijiPopulation(field: Field, share: number): number {
+  const count = kaijiPopulationCount(field.bots.length, share);
+  const order = field.bots.map((_, index) => index);
+  const rng = new Rng(hashString(`${field.seed}:kaiji-pop`) ^ 0xc0ffee);
+  for (let i = order.length - 1; i > 0; i--) {
+    const swap = rng.int(i + 1);
+    const hold = order[i];
+    order[i] = order[swap];
+    order[swap] = hold;
+  }
+  const chosen = new Set(order.slice(0, count));
+  for (let i = 0; i < field.bots.length; i++) field.bots[i].playsKaiji = chosen.has(i);
+  return count;
+}
+
 export function teamName(index: number): string {
   return TEAM_NAMES[index] ?? `Team ${index + 1}`;
 }
@@ -155,6 +180,7 @@ function makeBot(tier: Tier, index: number, rng: Rng): Bot {
     team: 0,
     elo: INITIAL_ELO,
     matches: 0,
+    playsKaiji: false,
     params,
     memory: emptyMemory(),
   };

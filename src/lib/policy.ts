@@ -39,6 +39,8 @@ export interface Bot {
   team: number;
   elo: number;
   matches: number;
+  /** This player uses Kaiji's static chart. Set for a share of the field at the start. */
+  playsKaiji: boolean;
   params: BotParams;
   memory: BotMemory;
 }
