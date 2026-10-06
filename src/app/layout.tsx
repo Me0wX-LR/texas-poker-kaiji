@@ -8,7 +8,6 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Texas Poker Kaiji",
   description: "An offline six-max Hold'em ladder. A static shove chart against a thousand bots, scored with the slide Elo rules.",
-  icons: { icon: "/kaiji.png" },
 };
 
 export default function RootLayout({
