@@ -4,12 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { PlayingCard } from "@/components/cards";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { TIER_LABEL, asset, formatChips } from "@/lib/constants";
+import { HANDS_PER_MATCH, TIER_LABEL, asset, formatChips, formatElo } from "@/lib/constants";
 import { PRACTICE_GROUPS } from "@/lib/field";
 import { HandMachine, type Act, type Decision } from "@/lib/hand";
 import { kaijiDecision } from "@/lib/kaiji";
 import { decideBot } from "@/lib/policy";
-import type { PracticePool, PracticeSeat } from "@/lib/controller";
+import type { FieldDuel, LadderRow, PracticePool, PracticeRate, PracticeSeat } from "@/lib/controller";
 import { Rng, hashString } from "@/lib/rng";
 import { TableAudio, handResult } from "@/lib/table-audio";
 
@@ -17,10 +17,24 @@ const STREETS = ["Preflop", "Flop", "Turn", "River"];
 
 export function HeadsUp({
   blinds,
+  locked,
+  ladder,
+  fieldDuels,
+  yourElo,
   pickOpponent,
+  liveRatings,
+  rateMatch,
+  tickField,
 }: {
   blinds: boolean;
+  locked: boolean;
+  ladder: LadderRow[];
+  fieldDuels: FieldDuel[];
+  yourElo: number;
   pickOpponent: (pool: PracticePool) => PracticeSeat | null;
+  liveRatings: (botId: string | null) => { own: number; you: number };
+  rateMatch: (botId: string | null, nets: [number, number]) => PracticeRate | null;
+  tickField: (excludeId: string | null) => void;
 }) {
   const rng = useRef(new Rng(hashString("kaiji-heads-up")));
   const handRef = useRef<HandMachine | null>(null);
@@ -37,6 +51,12 @@ export function HeadsUp({
   const opponentRef = useRef<PracticeSeat | null>(null);
   const [pool, setPool] = useState<PracticePool>("kaiji");
   const [opponent, setOpponent] = useState<PracticeSeat | null>(null);
+  const [rateNote, setRateNote] = useState<string | null>(null);
+  const matchHands = useRef(0);
+  const netsRef = useRef<[number, number]>([0, 0]);
+  const visibleRef = useRef(false);
+  const tickRef = useRef(tickField);
+  tickRef.current = tickField;
   if (!audio.current && typeof window !== "undefined") audio.current = new TableAudio();
   const refresh = () => setTick((value) => value + 1);
 
@@ -46,7 +66,10 @@ export function HeadsUp({
     setSoundOn(!table.muted);
     const node = rootRef.current;
     const observer = node
-      ? new IntersectionObserver(([entry]) => table.setAudible(entry.isIntersecting), { threshold: 0.15 })
+      ? new IntersectionObserver(([entry]) => {
+          visibleRef.current = entry.isIntersecting;
+          table.setAudible(entry.isIntersecting);
+        }, { threshold: 0.15 })
       : null;
     if (node && observer) observer.observe(node);
     return () => {
@@ -54,6 +77,14 @@ export function HeadsUp({
       table.dispose();
       audio.current = null;
     };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!visibleRef.current) return;
+      tickRef.current(opponentRef.current?.botId ?? null);
+    }, 900);
+    return () => window.clearInterval(timer);
   }, []);
 
   const hand = handRef.current;
@@ -95,11 +126,28 @@ export function HeadsUp({
   function settle(current: HandMachine | null) {
     if (!current || current.phase !== "done" || accounted.current) return;
     accounted.current = true;
-    setNets((currentNets) => [
-      currentNets[0] + current.stack[0] - 10000,
-      currentNets[1] + current.stack[1] - 10000,
-    ]);
-    setDealt((count) => count + 1);
+    const nextNets: [number, number] = [
+      netsRef.current[0] + current.stack[0] - 10000,
+      netsRef.current[1] + current.stack[1] - 10000,
+    ];
+    matchHands.current += 1;
+    if (matchHands.current >= HANDS_PER_MATCH) {
+      const seat = opponentRef.current;
+      const rated = rateMatch(seat?.botId ?? null, nextNets);
+      matchHands.current = 0;
+      netsRef.current = [0, 0];
+      setNets([0, 0]);
+      setDealt(0);
+      setRateNote(
+        rated
+          ? `Match rated. You ${formatElo(rated.you)} (${signedElo(rated.youDelta)}), ${rated.oppName} ${formatElo(rated.opp)} (${signedElo(rated.oppDelta)}).`
+          : "This run is locked, so that match was not rated.",
+      );
+    } else {
+      netsRef.current = nextNets;
+      setNets(nextNets);
+      setDealt(matchHands.current);
+    }
     const result = handResult(current.stack[0]);
     if (result === "win") audio.current?.win();
     else if (result === "lose") audio.current?.lose();
@@ -116,8 +164,9 @@ function voice(actName: Act, current: HandMachine) {
   function opponentDecision(ctx: ReturnType<HandMachine["fillCtx"]>): Decision {
     const seat = opponentRef.current;
     if (!seat || seat.usesKaiji || !seat.bot) return kaijiDecision(ctx.hole0, ctx.hole1, ctx.board, ctx.street, ctx.toCall);
-    ctx.ownElo = seat.bot.elo;
-    ctx.oppAvgElo = 1500;
+    const ratings = liveRatings(seat.botId);
+    ctx.ownElo = ratings.own;
+    ctx.oppAvgElo = ratings.you;
     return decideBot(seat.bot, ctx, () => rng.current.next());
   }
 
@@ -127,8 +176,13 @@ function voice(actName: Act, current: HandMachine) {
       setError("Nobody in that group is seated in this field.");
       return false;
     }
+    if (matchHands.current > 0) {
+      setRateNote(`${matchHands.current} of ${HANDS_PER_MATCH} hands is not a rated match.`);
+    }
     opponentRef.current = seat;
     setOpponent(seat);
+    matchHands.current = 0;
+    netsRef.current = [0, 0];
     setNets([0, 0]);
     setDealt(0);
     return true;
@@ -147,7 +201,7 @@ function voice(actName: Act, current: HandMachine) {
     audio.current?.deal();
     handRef.current = new HandMachine({
       n: 2,
-      button: dealt % 2,
+      button: matchHands.current % 2,
       blinds,
       rng: rng.current,
       keepLog: true,
@@ -188,6 +242,13 @@ function voice(actName: Act, current: HandMachine) {
   return (
     <section ref={rootRef} className="flex flex-col gap-4">
       <MatchPicker pool={pool} setPool={setPool} opponent={opponent} />
+      <LiveLadder
+        ladder={ladder}
+        duels={fieldDuels}
+        locked={locked}
+        yourElo={yourElo}
+        opponentId={opponent?.botId ?? (opponent?.name === "Kaiji" ? "kaiji" : null)}
+      />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <div className="felt relative rounded-[2rem] p-4 sm:p-6">
         <p className="pointer-events-none absolute inset-x-0 top-6 text-center font-display text-xs tracking-[0.4em] text-[#e2b657]/30">
@@ -207,7 +268,7 @@ function voice(actName: Act, current: HandMachine) {
                 {opponent ? `${opponent.name} is in the chair` : "Pick who sits across from you"}
               </h2>
               <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-[#d5c7ae]">
-                Heads-up is practice. It does not move the ladder. You each get 10,000 chips a hand.
+                You each get 10,000 chips a hand. A match is 240 hands, then both ratings move.
                 {blinds ? " Blinds are 50 and 100, and the button posts the small blind." : " Blinds are off. An all-check hand moves nothing."}
               </p>
             </div>
@@ -233,7 +294,7 @@ function voice(actName: Act, current: HandMachine) {
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-display text-[10px] text-[#f6efe2]">{opponent?.name ?? "Opponent"}</p>
                   <p className="truncate text-xs text-[#d5c7ae]">
-                    {opponent ? `${opponent.style} · ${opponent.personality}` : ""}
+                    {opponent ? `${opponent.style} · ${opponent.personality} · ${formatElo(liveRatings(opponent.botId).own)}` : ""}
                     {hand.actor === 1 && hand.phase === "act" ? " · Thinking…" : hand.lastAction ? ` · ${hand.lastAction}` : ""}
                   </p>
                 </div>
@@ -352,11 +413,13 @@ function voice(actName: Act, current: HandMachine) {
             <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Session chips</p>
             <SoundButton on={soundOn} onToggle={toggleSound} />
           </div>
-          <p className="mt-1 text-sm">You {formatChips(nets[0])}</p>
-          <p className="text-sm">{opponent?.name ?? "Opponent"} {formatChips(nets[1])}</p>
+          <p className="mt-1 text-sm">You {formatChips(nets[0])} · {formatElo(yourElo)}</p>
+          <p className="text-sm">{opponent?.name ?? "Opponent"} {formatChips(nets[1])}{opponent ? ` · ${formatElo(liveRatings(opponent.botId).own)}` : ""}</p>
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-            {dealt} hand{dealt === 1 ? "" : "s"} with this opponent. A new opponent starts the chip count over. This table does not move the ladder.
+            Match hand {dealt} / {HANDS_PER_MATCH}. Ratings move when the 240th hand ends. A new opponent starts the chips over and leaves a short sit unrated.
+            {locked ? " This run is locked, so nothing here changes the ladder." : " The field plays its own matches beside you."}
           </p>
+          {rateNote ? <p className="mt-2 text-sm text-foreground">{rateNote}</p> : null}
         </div>
       </aside>
       </div>
@@ -410,8 +473,59 @@ function MatchPicker({
         )}
       </p>
       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-        Random draws anyone in the field. A style or a personality draws one player of that type. Next hand stays with them. New opponent draws again.
+        Random draws anyone in the field. A style or a personality draws one player of that type. Next hand stays with them. New opponent draws again. Both of you are rated after 240 hands. Everyone else keeps playing in the background.
       </p>
+    </div>
+  );
+}
+
+function signedElo(delta: number): string {
+  const rounded = Math.round(delta);
+  if (rounded > 0) return `+${rounded.toLocaleString("en-US")}`;
+  return rounded.toLocaleString("en-US");
+}
+
+function LiveLadder({
+  ladder,
+  duels,
+  locked,
+  yourElo,
+  opponentId,
+}: {
+  ladder: LadderRow[];
+  duels: FieldDuel[];
+  locked: boolean;
+  yourElo: number;
+  opponentId: string | null;
+}) {
+  const rows = ladder.slice(0, 8);
+  const pinned = ladder.filter((row) => (row.id === "you" || row.id === opponentId) && !rows.some((shown) => shown.id === row.id));
+  const latest = duels[0];
+  return (
+    <div className="rounded-xl border bg-card p-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Ladder</p>
+        <p className="text-sm">You {formatElo(yourElo)}</p>
+      </div>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+        {locked
+          ? "The run is locked. Field matches are paused."
+          : latest
+            ? `${latest.aName} ${formatElo(latest.aElo)} (${signedElo(latest.aDelta)}) vs ${latest.bName} ${formatElo(latest.bElo)} (${signedElo(latest.bDelta)})`
+            : "The field is about to play. Ratings move as those matches finish."}
+      </p>
+      <ul className="mt-2 grid gap-1 sm:grid-cols-2">
+        {[...rows, ...pinned].map((row) => (
+          <li key={row.id} className="flex items-baseline justify-between gap-2 text-sm">
+            <span className="min-w-0 truncate">
+              <span className="text-muted-foreground">{row.rank} </span>
+              {row.name}
+              <span className="text-muted-foreground"> · {row.style}</span>
+            </span>
+            <span className="shrink-0 tabular-nums">{formatElo(row.elo)}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

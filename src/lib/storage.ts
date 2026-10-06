@@ -31,6 +31,9 @@ export interface SaveData {
   /** kaijiMatches already finished before win tracking started. Older saves omit this. */
   winrateFrom?: number;
   kaijiElo: number;
+  /** Heads-up rating for the person at the table. Older saves omit this and start at 1,500. */
+  yourElo?: number;
+  yourMatches?: number;
   kaijiChips: number;
   tierChips: Record<Tier, number>;
   teamChips: number[];

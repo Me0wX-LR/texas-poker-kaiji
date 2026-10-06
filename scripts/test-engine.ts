@@ -4,7 +4,7 @@ import { applyKaijiPopulation, botSignature, generateField, teamName, teamPools,
 import { selectPracticeBot } from "../src/lib/controller";
 import { HandMachine, playHand, type Decision } from "../src/lib/hand";
 import { kaijiDecision, kaijiPostflopShove, kaijiPreflopShove } from "../src/lib/kaiji";
-import { playRatedMatch } from "../src/lib/match";
+import { playHeadsUpMatch, playRatedMatch } from "../src/lib/match";
 import { Rng } from "../src/lib/rng";
 import { DEFAULT_MATCH_DEADLINE, HANDS_PER_MATCH, INITIAL_ELO } from "../src/lib/constants";
 
@@ -228,6 +228,31 @@ check("random practice draw is a field player", randomPick !== null && randomPic
 const eloBefore = practice.bots.map((bot) => bot.elo);
 selectPracticeBot(practice.bots, "random", 0.5);
 check("practice draw leaves ratings", practice.bots.every((bot, i) => bot.elo === eloBefore[i]));
+
+const headsUpScores = placementScores([40, -40]);
+check("heads-up winner scores 1", headsUpScores[0] === 1 && headsUpScores[1] === 0);
+const tied = placementScores([0, 0]);
+check("heads-up tie splits", tied[0] === 0.5 && tied[1] === 0.5);
+const shifted = eloUpdates([1500, 1500], [1, 0]);
+check("equal heads-up match is +16 and -16", Math.abs(shifted[0] - 1516) < 1e-9 && Math.abs(shifted[1] - 1484) < 1e-9);
+
+const duelField = generateField("duel", 7, 1000);
+const left = duelField.bots[0];
+const right = duelField.bots[1];
+const leftElo = left.elo;
+const rightElo = right.elo;
+const duel = playHeadsUpMatch({
+  seats: [
+    { team: left.team, bot: left, elo: left.elo, oppAvg: right.elo, asKaiji: false },
+    { team: right.team, bot: right, elo: right.elo, oppAvg: left.elo, asKaiji: false },
+  ],
+  blinds: true,
+  rng: new Rng(11),
+  learn: false,
+});
+check("heads-up chips balance", Math.abs(duel.nets[0] + duel.nets[1]) < 1e-6, duel.nets.join(","));
+check("heads-up elo is zero-sum", Math.abs(duel.next[0] + duel.next[1] - leftElo - rightElo) < 1e-6);
+check("heads-up match can move a rating", duel.next[0] !== leftElo || duel.next[1] !== rightElo);
 
 console.log(`match pace ${((HANDS_PER_MATCH / dt) * 1000).toFixed(0)} hands/sec`);
 if (failed) {

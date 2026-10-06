@@ -17,7 +17,7 @@ import { eloUpdates, placementScores } from "./elo";
 import { Field, applyKaijiPopulation, generateField, teamMeans, teamName, teamPools, tierMeans, tierPools, validateField } from "./field";
 import { HandMachine, HandResult, playHand } from "./hand";
 import { kaijiDecision } from "./kaiji";
-import { SeatCard, drawSeats } from "./match";
+import { SeatCard, drawSeats, playHeadsUpMatch } from "./match";
 import { decideBot, learnFromHand, type Bot } from "./policy";
 import { Rng, hashString } from "./rng";
 import { HistoryPoint, SaveData, clearSave, loadSave, writeSave } from "./storage";
@@ -60,7 +60,27 @@ export interface PracticeSeat {
   style: string;
   personality: string;
   usesKaiji: boolean;
+  /** Field player id. Null when the opponent is Kaiji himself. */
+  botId: string | null;
   bot: Bot | null;
+}
+
+export interface FieldDuel {
+  id: number;
+  aName: string;
+  bName: string;
+  aElo: number;
+  bElo: number;
+  aDelta: number;
+  bDelta: number;
+}
+
+export interface PracticeRate {
+  you: number;
+  opp: number;
+  youDelta: number;
+  oppDelta: number;
+  oppName: string;
 }
 
 /** Draw one field player for a practice seat. `roll` is in [0, 1). Kaiji himself is not in the field. */
@@ -94,7 +114,7 @@ function copyBot(bot: Bot): Bot {
 
 function seatFromPick(pick: Bot | "kaiji"): PracticeSeat {
   if (pick === "kaiji") {
-    return { name: "Kaiji", style: "Kaiji", personality: "Static chart", usesKaiji: true, bot: null };
+    return { name: "Kaiji", style: "Kaiji", personality: "Static chart", usesKaiji: true, botId: null, bot: null };
   }
   const usesKaiji = pick.playsKaiji;
   return {
@@ -102,6 +122,7 @@ function seatFromPick(pick: Bot | "kaiji"): PracticeSeat {
     style: usesKaiji ? "Kaiji chart" : TIER_LABEL[pick.tier],
     personality: pick.params.personality,
     usesKaiji,
+    botId: pick.id,
     bot: usesKaiji ? null : copyBot(pick),
   };
 }
@@ -171,6 +192,10 @@ export interface SimSnap {
   ladder: LadderRow[];
   kaijiRank: number;
   fieldSize: number;
+  yourElo: number;
+  yourMatches: number;
+  /** Latest heads-up matches the field played on its own. Newest first. */
+  fieldDuels: FieldDuel[];
   history: HistoryPoint[];
   table: TableSnap | null;
   clock: string;
@@ -206,6 +231,13 @@ export class SimController {
   private kaijiWins = 0;
   private winrateFrom = 0;
   private kaijiElo = INITIAL_ELO;
+  private yourElo = INITIAL_ELO;
+  private yourMatches = 0;
+  private duelRng = new Rng(1);
+  private duelSerial = 1;
+  private fieldDuels: FieldDuel[] = [];
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private dirty = false;
   private kaijiChips = 0;
   private tierChips = freshTierChips();
   private teamChips: number[] = [];
@@ -251,6 +283,9 @@ export class SimController {
   dispose(): void {
     this.running = false;
     if (this.timer) clearTimeout(this.timer);
+    if (this.persistTimer) clearTimeout(this.persistTimer);
+    this.persistTimer = null;
+    if (this.dirty) this.persist();
   }
 
   start(): void {
@@ -310,6 +345,45 @@ export class SimController {
     if (!this.field && pool !== "kaiji") return null;
     const pick = selectPracticeBot(this.field?.bots ?? [], pool, Math.random());
     return pick ? seatFromPick(pick) : null;
+  }
+
+  practiceRatings(botId: string | null): { own: number; you: number } {
+    if (!botId) return { own: this.kaijiElo, you: this.yourElo };
+    const bot = this.field?.bots.find((item) => item.id === botId);
+    return { own: bot?.elo ?? INITIAL_ELO, you: this.yourElo };
+  }
+
+  /**
+   * Rate a finished 240-hand heads-up match. A locked run does not move.
+   * `botId` null is Kaiji himself. His win rate and the six-max clock stay put.
+   */
+  rateYourMatch(botId: string | null, nets: [number, number]): PracticeRate | null {
+    if (this.locked || !this.field) return null;
+    const bot = botId ? this.field.bots.find((item) => item.id === botId) ?? null : null;
+    if (botId && !bot) return null;
+    const oppElo = bot ? bot.elo : this.kaijiElo;
+    const oppName = bot ? bot.name : "Kaiji";
+    const next = eloUpdates([this.yourElo, oppElo], placementScores(nets));
+    const youDelta = next[0] - this.yourElo;
+    const oppDelta = next[1] - oppElo;
+    this.yourElo = next[0];
+    this.yourMatches += 1;
+    if (bot) {
+      bot.elo = next[1];
+      bot.matches += 1;
+    } else this.kaijiElo = next[1];
+    for (let i = 0; i < 4; i++) this.playFieldDuel(botId);
+    this.dirty = false;
+    this.persist();
+    this.emit();
+    return { you: this.yourElo, opp: bot ? bot.elo : this.kaijiElo, youDelta, oppDelta, oppName };
+  }
+
+  /** One rated heads-up match between two field players. Skipped while the run is locked. */
+  tickFieldDuel(excludeId: string | null): void {
+    if (!this.playFieldDuel(excludeId)) return;
+    this.schedulePersist();
+    this.emit();
   }
 
   findBots(query: string): BotHit[] {
@@ -373,6 +447,9 @@ export class SimController {
       ladder: ladder.rows,
       kaijiRank: ladder.kaijiRank,
       fieldSize: ladder.fieldSize,
+      yourElo: this.yourElo,
+      yourMatches: this.yourMatches,
+      fieldDuels: this.fieldDuels,
       history: this.history,
       table: this.tableSnap(),
       clock: this.clockText(),
@@ -386,6 +463,7 @@ export class SimController {
   private playerLadder(): { rows: LadderRow[]; kaijiRank: number; fieldSize: number } {
     const entries: Array<Omit<LadderRow, "rank">> = [
       { id: "kaiji", name: "Kaiji", style: "Kaiji", elo: this.kaijiElo, matches: this.kaijiMatches, isHero: true },
+      { id: "you", name: "You", style: "Heads-up", elo: this.yourElo, matches: this.yourMatches, isHero: false },
     ];
     for (const bot of this.field?.bots ?? []) {
       entries.push({
@@ -515,6 +593,11 @@ export class SimController {
     this.kaijiWins = 0;
     this.winrateFrom = 0;
     this.kaijiElo = INITIAL_ELO;
+    this.yourElo = INITIAL_ELO;
+    this.yourMatches = 0;
+    this.duelRng = new Rng(hashString(`${seed}:duel`) ^ 0x0d0e1);
+    this.duelSerial = 1;
+    this.fieldDuels = [];
     this.kaijiChips = 0;
     this.tierChips = freshTierChips();
     this.teamChips = Array.from({ length: teamCount }, () => 0);
@@ -557,6 +640,10 @@ export class SimController {
     this.kaijiWins = saved.kaijiWins ?? 0;
     this.winrateFrom = saved.winrateFrom ?? (saved.kaijiWins === undefined ? saved.kaijiMatches : 0);
     this.kaijiElo = saved.kaijiElo;
+    this.yourElo = saved.yourElo ?? INITIAL_ELO;
+    this.yourMatches = saved.yourMatches ?? 0;
+    this.duelRng = new Rng(hashString(`${saved.seed}:duel`) ^ 0x0d0e1);
+    this.fieldDuels = [];
     this.kaijiChips = saved.kaijiChips;
     this.tierChips = { ...saved.tierChips };
     this.teamChips = saved.teamChips.slice();
@@ -804,8 +891,60 @@ export class SimController {
     this.persist();
   }
 
+  private schedulePersist(): void {
+    this.dirty = true;
+    if (this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      if (!this.dirty) return;
+      this.dirty = false;
+      this.persist();
+    }, 1200);
+  }
+
+  private playFieldDuel(excludeId: string | null): boolean {
+    if (this.locked || !this.field) return false;
+    const busy = new Set<string>();
+    if (excludeId) busy.add(excludeId);
+    if (this.live) {
+      for (const seat of this.live.seats) if (seat.bot) busy.add(seat.bot.id);
+    }
+    const pool = this.field.bots.filter((bot) => !busy.has(bot.id));
+    if (pool.length < 2) return false;
+    const first = this.duelRng.int(pool.length);
+    let second = this.duelRng.int(pool.length - 1);
+    if (second >= first) second++;
+    const a = pool[first];
+    const b = pool[second];
+    const seats: [SeatCard, SeatCard] = [
+      { team: a.team, bot: a, elo: a.elo, oppAvg: b.elo, asKaiji: a.playsKaiji },
+      { team: b.team, bot: b, elo: b.elo, oppAvg: a.elo, asKaiji: b.playsKaiji },
+    ];
+    const played = playHeadsUpMatch({ seats, blinds: this.blinds, rng: this.duelRng, learn: true });
+    const aDelta = played.next[0] - a.elo;
+    const bDelta = played.next[1] - b.elo;
+    a.elo = played.next[0];
+    b.elo = played.next[1];
+    a.matches += 1;
+    b.matches += 1;
+    this.fieldDuels = [
+      {
+        id: this.duelSerial++,
+        aName: a.name,
+        bName: b.name,
+        aElo: a.elo,
+        bElo: b.elo,
+        aDelta,
+        bDelta,
+      },
+      ...this.fieldDuels,
+    ].slice(0, 6);
+    return true;
+  }
+
   private persist(): void {
     if (!this.field) return;
+    this.dirty = false;
     const elos: Record<string, number> = {};
     const botMatches: Record<string, number> = {};
     const agentic: SaveData["agentic"] = {};
@@ -831,6 +970,8 @@ export class SimController {
       kaijiWins: this.kaijiWins,
       winrateFrom: this.winrateFrom,
       kaijiElo: this.kaijiElo,
+      yourElo: this.yourElo,
+      yourMatches: this.yourMatches,
       kaijiChips: this.kaijiChips,
       tierChips: this.tierChips,
       teamChips: this.teamChips,

@@ -272,7 +272,17 @@ export function KaijiApp() {
           <ExperimentPanel snap={snap} tierLines={tierLines} chipLines={chipLines} query={query} setQuery={setQuery} hits={hits} />
         </TabsContent>
         <TabsContent value="heads" className="mt-3">
-          <HeadsUp blinds={snap.blinds} pickOpponent={(pool) => simRef.current?.practiceOpponent(pool) ?? null} />
+          <HeadsUp
+            blinds={snap.blinds}
+            locked={snap.locked}
+            ladder={snap.ladder}
+            fieldDuels={snap.fieldDuels}
+            yourElo={snap.yourElo}
+            pickOpponent={(pool) => simRef.current?.practiceOpponent(pool) ?? null}
+            liveRatings={(botId) => simRef.current?.practiceRatings(botId) ?? { own: 1500, you: snap.yourElo }}
+            rateMatch={(botId, nets) => simRef.current?.rateYourMatch(botId, nets) ?? null}
+            tickField={(excludeId) => simRef.current?.tickFieldDuel(excludeId)}
+          />
         </TabsContent>
         <TabsContent value="rules" className="mt-3">
           <RulesPanel />
@@ -470,7 +480,7 @@ function LadderPanel({
         </div>
       </div>
       <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-        Rank is standing by Elo. 1 is the highest rating, and a tie breaks by name, so every player has their own number. It moves when a rated match ends. Kaiji is rank {snap.kaijiRank.toLocaleString("en-US")} of {snap.fieldSize.toLocaleString("en-US")}. Click a column to sort. Show 20 and Show 100 keep that order.
+        Rank is standing by Elo. 1 is the highest rating, and a tie breaks by name, so every player has their own number. It moves when a rated match ends, including heads-up matches in that tab. Kaiji is rank {snap.kaijiRank.toLocaleString("en-US")} of {snap.fieldSize.toLocaleString("en-US")}. Click a column to sort. Show 20 and Show 100 keep that order.
       </p>
       <div className="mt-3 max-h-[70dvh] overflow-auto">
         <table className="w-full min-w-[20rem] text-left text-sm">
@@ -696,7 +706,7 @@ function RulesPanel() {
       <section className="rounded-xl border bg-card p-4">
         <h2 className="text-base">Who else is in the room</h2>
         <p className="mt-2 text-muted-foreground">
-          The field is individual players, at least a thousand of them. There are no teams. Four styles share that field: a fast GTO-style chart, dynamic bots whose tightness and aggression move with their own Elo and the table&apos;s Elo, frozen personalities fixed at creation, and adapters that rewrite thresholds from showdown rate, fold-to-shove, and aggression they actually saw. Each match draws Kaiji plus five of those players for all 240 hands. The ladder ranks each player by their own Elo. Win rate is the share of rated matches in which Kaiji tied or took the best chip result. Heads-up is a side game: random matchmaking, Kaiji, or one player drawn from a style or personality. It does not touch these ratings. Ratings stay in localStorage.
+          The field is individual players, at least a thousand of them. There are no teams. Four styles share that field: a fast GTO-style chart, dynamic bots whose tightness and aggression move with their own Elo and the table&apos;s Elo, frozen personalities fixed at creation, and adapters that rewrite thresholds from showdown rate, fold-to-shove, and aggression they actually saw. Each match draws Kaiji plus five of those players for all 240 hands. The ladder ranks each player by their own Elo. Win rate is the share of rated matches in which Kaiji tied or took the best chip result. Heads-up uses the same rating formula. Your match is rated after 240 hands, and the rest of the field plays its own heads-up matches while that tab is open. A locked run does not move. Ratings stay in localStorage.
         </p>
       </section>
       <section className="rounded-xl border bg-card p-4">
