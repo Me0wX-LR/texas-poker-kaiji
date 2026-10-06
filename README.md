@@ -39,9 +39,7 @@ Kaiji preflop: all-in with any pocket pair or AK, AQ, AJ, AT (suited or offsuit)
 
 ## Deploy to GitHub Pages
 
-The build is a static export. A push to `main` runs `.github/workflows/pages.yml`, which builds with `NEXT_PUBLIC_BASE_PATH` set to `/<repository-name>` and publishes `out/` through GitHub Actions. The playable site is:
-
-`https://<owner>.github.io/<repository>/`
+The build is a static export. A push to `main` runs `.github/workflows/pages.yml`, which builds with `NEXT_PUBLIC_BASE_PATH` set to `/<repository-name>` and publishes `out/` through GitHub Actions. The playable site is [https://me0wx-lr.github.io/texas-poker-kaiji/](https://me0wx-lr.github.io/texas-poker-kaiji/).
 
 Local `npm run dev` and `npm run build` leave the base path empty, so the app still opens at the site root. To preview the project-site build:
 
