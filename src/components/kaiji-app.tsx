@@ -28,7 +28,8 @@ import {
   formatElo,
   formatMatchTime,
 } from "@/lib/constants";
-import { SimController, type SimSnap } from "@/lib/controller";
+import { SimController, type LadderRow, type SimSnap } from "@/lib/controller";
+import { kaijiPopulationCount } from "@/lib/field";
 import type { HistoryPoint } from "@/lib/storage";
 
 const TIER_COLORS: Record<(typeof TIERS)[number], string> = {
@@ -45,6 +46,7 @@ export function KaijiApp() {
   const [setupOpen, setSetupOpen] = useState(false);
   const [seed, setSeed] = useState("kaiji-2026");
   const [bots, setBots] = useState("1200");
+  const [kaijiShare, setKaijiShare] = useState("0");
   const [ladderCut, setLadderCut] = useState<20 | 100>(20);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [matchDraft, setMatchDraft] = useState(String(DEFAULT_MATCH_DEADLINE));
@@ -125,7 +127,7 @@ export function KaijiApp() {
   const matchStopCopy = `${shownMatches.toLocaleString("en-US")} ${matchWord} = ${(shownMatches * HANDS_PER_MATCH).toLocaleString("en-US")} hands`;
 
   function submitSetup() {
-    const message = simRef.current?.newRun(seed, Number(bots)) ?? "The table is not ready.";
+    const message = simRef.current?.newRun(seed, Number(bots), Number(kaijiShare)) ?? "The table is not ready.";
     if (message) setSetupError(message);
     else {
       setSetupError(null);
@@ -227,6 +229,7 @@ export function KaijiApp() {
             onClick={() => {
               setSeed(snap.seed);
               setBots(String(snap.botCount));
+              setKaijiShare(String(snap.kaijiShare));
               setSetupError(null);
               setSetupOpen(true);
             }}
@@ -241,6 +244,8 @@ export function KaijiApp() {
           {snap.handsPlayed.toLocaleString("en-US")} / {snap.handDeadline.toLocaleString("en-US")} hands
           {" · "}
           Kaiji seated {snap.kaijiMatches.toLocaleString("en-US")}
+          {" · "}
+          Kaiji chart on {snap.kaijiPopulation.toLocaleString("en-US")} of {snap.botCount.toLocaleString("en-US")} players ({snap.kaijiShare}%)
           {" · "}
           {snap.clock}
           {snap.blinds ? " · Blinds 50/100" : " · No forced blinds"}
@@ -291,8 +296,17 @@ export function KaijiApp() {
               <Label htmlFor="bots">Players</Label>
               <Input id="bots" inputMode="numeric" value={bots} onChange={(event) => setBots(event.target.value)} />
             </div>
+            <div className="grid gap-1">
+              <Label htmlFor="kaiji-share">Kaiji population %</Label>
+              <Input
+                id="kaiji-share"
+                inputMode="numeric"
+                value={kaijiShare}
+                onChange={(event) => setKaijiShare(event.target.value)}
+              />
+            </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              At least 1,000 players, default 1,200. Kaiji sits with five of them drawn from that field. The same seed repeats the deals. There are no teams.
+              Set this here, when the run starts. {populationCopy(bots, kaijiShare)} The real Kaiji is one more player and always uses the chart. There are no teams. At least 1,000 players, default 1,200. The same seed repeats the deals.
             </p>
             {setupError ? <p className="text-sm text-[#ffb4b4]">{setupError}</p> : null}
           </div>
@@ -397,6 +411,28 @@ function winRateDetail(snap: SimSnap): string {
   return `${snap.kaijiWins} / ${snap.winrateTracked} first`;
 }
 
+function populationCopy(bots: string, share: string): string {
+  const count = Number(bots);
+  const pct = Number(share);
+  if (!Number.isInteger(count) || count < 1 || !Number.isInteger(pct) || pct < 0 || pct > 100) {
+    return "Use a whole percent from 0 to 100.";
+  }
+  const marked = kaijiPopulationCount(count, pct);
+  return `${marked.toLocaleString("en-US")} of ${count.toLocaleString("en-US")} players use Kaiji's chart from the first hand.`;
+}
+
+type LadderSort = "rank" | "name" | "style" | "elo";
+
+function compareLadder(a: LadderRow, b: LadderRow, key: LadderSort, dir: 1 | -1): number {
+  let delta = 0;
+  if (key === "name") delta = a.name.localeCompare(b.name);
+  else if (key === "style") delta = a.style.localeCompare(b.style) || a.name.localeCompare(b.name);
+  else if (key === "elo") delta = a.elo - b.elo;
+  else delta = a.rank - b.rank;
+  if (delta === 0) delta = a.rank - b.rank;
+  return delta * dir;
+}
+
 function LadderPanel({
   snap,
   cut,
@@ -406,7 +442,16 @@ function LadderPanel({
   cut: 20 | 100;
   setCut: (cut: 20 | 100) => void;
 }) {
-  const rows = snap.ladder.slice(0, cut);
+  const [sortKey, setSortKey] = useState<LadderSort>("rank");
+  const [sortDir, setSortDir] = useState<1 | -1>(1);
+  function sortBy(key: LadderSort) {
+    if (sortKey === key) setSortDir((dir) => (dir === 1 ? -1 : 1));
+    else {
+      setSortKey(key);
+      setSortDir(key === "elo" ? -1 : 1);
+    }
+  }
+  const rows = snap.ladder.slice().sort((a, b) => compareLadder(a, b, sortKey, sortDir)).slice(0, cut);
   const kaijiShown = rows.some((row) => row.isHero);
   return (
     <section className="rounded-xl border bg-card p-4">
@@ -417,31 +462,30 @@ function LadderPanel({
         </div>
         <div className="flex gap-2">
           <Button className="min-h-11" variant={cut === 20 ? "default" : "outline"} onClick={() => setCut(20)}>
-            Top 20
+            Show 20
           </Button>
           <Button className="min-h-11" variant={cut === 100 ? "default" : "outline"} onClick={() => setCut(100)}>
-            Top 100
+            Show 100
           </Button>
         </div>
       </div>
       <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-        Each row is one player. Rank is that player&apos;s own Elo, not a style total. Kaiji is rank {snap.kaijiRank.toLocaleString("en-US")} of {snap.fieldSize.toLocaleString("en-US")}.
-        {snap.matchesCompleted === 0 ? " Nobody has been rated yet, so the room is still tied at 1,500 and the order is by name." : ""}
+        Rank is standing by Elo. 1 is the highest rating, and a tie breaks by name, so every player has their own number. It moves when a rated match ends. Kaiji is rank {snap.kaijiRank.toLocaleString("en-US")} of {snap.fieldSize.toLocaleString("en-US")}. Click a column to sort. Show 20 and Show 100 keep that order.
       </p>
       <div className="mt-3 max-h-[70dvh] overflow-auto">
         <table className="w-full min-w-[20rem] text-left text-sm">
           <thead className="sticky top-0 bg-card text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
-              <th className="py-2 pr-3 font-medium">Rank</th>
-              <th className="py-2 pr-3 font-medium">Player</th>
-              <th className="py-2 pr-3 font-medium">Style</th>
-              <th className="py-2 pr-3 font-medium">Elo</th>
+              <SortHeader label="Rank" column="rank" sortKey={sortKey} sortDir={sortDir} onSort={sortBy} />
+              <SortHeader label="Player" column="name" sortKey={sortKey} sortDir={sortDir} onSort={sortBy} />
+              <SortHeader label="Style" column="style" sortKey={sortKey} sortDir={sortDir} onSort={sortBy} />
+              <SortHeader label="Elo" column="elo" sortKey={sortKey} sortDir={sortDir} onSort={sortBy} />
               <th className="py-2 font-medium">Matches</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={`${row.rank}-${row.name}`} className={`border-t ${row.isHero ? "bg-[#3a1818]" : ""}`}>
+              <tr key={row.id} className={`border-t ${row.isHero ? "bg-[#3a1818]" : ""}`}>
                 <td className="py-2 pr-3 tabular-nums">{row.rank}</td>
                 <td className="py-2 pr-3">{row.name}</td>
                 <td className="py-2 pr-3 text-muted-foreground">{row.style}</td>
@@ -453,9 +497,33 @@ function LadderPanel({
         </table>
       </div>
       {!kaijiShown ? (
-        <p className="mt-3 text-sm text-muted-foreground">Kaiji is outside this cut, at rank {snap.kaijiRank.toLocaleString("en-US")}.</p>
+        <p className="mt-3 text-sm text-muted-foreground">Kaiji is outside this page, at rank {snap.kaijiRank.toLocaleString("en-US")}.</p>
       ) : null}
     </section>
+  );
+}
+
+function SortHeader({
+  label,
+  column,
+  sortKey,
+  sortDir,
+  onSort,
+}: {
+  label: string;
+  column: LadderSort;
+  sortKey: LadderSort;
+  sortDir: 1 | -1;
+  onSort: (column: LadderSort) => void;
+}) {
+  const active = sortKey === column;
+  return (
+    <th className="py-1 pr-3 font-medium" aria-sort={active ? (sortDir === 1 ? "ascending" : "descending") : "none"}>
+      <button type="button" className="min-h-11 text-left uppercase tracking-wide" onClick={() => onSort(column)}>
+        {label}
+        {active ? (sortDir === 1 ? " ↑" : " ↓") : ""}
+      </button>
+    </th>
   );
 }
 

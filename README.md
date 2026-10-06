@@ -19,7 +19,7 @@ Open [http://127.0.0.1:47221](http://127.0.0.1:47221).
 
 - **The table** deals six-handed matches. Speed runs from 1× (every action) through 1000× (batched hands, chart still updates).
 - **Blind bet required** posts 50/100. Off, nobody posts; an all-check hand moves 0 chips. The minimum opening bet stays 100.
-- **Heads-up** is you against Kaiji with the mouse. It does not move the ladder.
+- **Heads-up** is you against Kaiji with the mouse or a finger. It does not move the ladder. Sound on starts a synthesized pulse and hits for cards, chips, an all-in, and the result. Sound off keeps the table quiet. The browser only starts audio after you tap.
 - **Experiment** states the claim and plots Elo and chips from the run. The verdict is computed. A deadline locks Kaiji's final Elo.
 - **New run** sets the seed and the player count (at least 1,000, default 1,200). There are no teams. The same seed repeats the deals.
 - **Ladder** ranks each player by their own Elo. Switch between the top 20 and the top 100.

@@ -14,7 +14,7 @@ import {
   formatMatchTime,
 } from "./constants";
 import { eloUpdates, placementScores } from "./elo";
-import { Field, generateField, teamMeans, teamName, teamPools, tierMeans, tierPools, validateField } from "./field";
+import { Field, applyKaijiPopulation, generateField, teamMeans, teamName, teamPools, tierMeans, tierPools, validateField } from "./field";
 import { HandMachine, HandResult, playHand } from "./hand";
 import { kaijiDecision } from "./kaiji";
 import { SeatCard, drawSeats } from "./match";
@@ -64,6 +64,7 @@ export interface BotHit {
 }
 
 export interface LadderRow {
+  id: string;
   rank: number;
   name: string;
   style: string;
@@ -93,6 +94,9 @@ export interface SimSnap {
   seed: string;
   teamCount: number;
   botCount: number;
+  /** Whole percent of the bot field that plays Kaiji's chart. Set when the run starts. */
+  kaijiShare: number;
+  kaijiPopulation: number;
   matchDeadline: number;
   handDeadline: number;
   matchesCompleted: number;
@@ -144,6 +148,7 @@ export class SimController {
   private handDeadline = DEFAULT_HAND_DEADLINE;
   private matchesCompleted = 0;
   private handsPlayed = 0;
+  private kaijiShare = 0;
   private kaijiMatches = 0;
   private kaijiWins = 0;
   private winrateFrom = 0;
@@ -232,13 +237,17 @@ export class SimController {
     return null;
   }
 
-  newRun(seed: string, botCount: number): string | null {
+  newRun(seed: string, botCount: number, kaijiShare: number): string | null {
     const clean = seed.trim();
     if (!clean) return "The run needs a seed.";
+    if (!Number.isInteger(kaijiShare) || kaijiShare < 0 || kaijiShare > 100) {
+      return "Kaiji population needs a whole percent from 0 to 100.";
+    }
     const problem = validateField(DEFAULT_TEAMS, botCount);
     if (problem) return problem;
     this.pause();
     this.error = null;
+    this.kaijiShare = kaijiShare;
     this.applyNew(clean, DEFAULT_TEAMS, botCount, true);
     this.emit();
     return null;
@@ -270,7 +279,7 @@ export class SimController {
     const teamElos = this.field ? teamMeans(this.field, this.kaijiElo) : [this.kaijiElo];
     const teamPiles = this.field ? teamPools(this.field, this.kaijiElo) : [this.kaijiElo];
     const teamNames = this.field ? Array.from({ length: this.field.teamCount }, (_, i) => teamName(i)) : ["Kaiji"];
-    const ladder = this.playerLadder(100);
+    const ladder = this.playerLadder();
     return {
       phase: !this.booted ? "loading" : this.error ? "error" : "ready",
       error: this.error,
@@ -284,6 +293,8 @@ export class SimController {
       seed: this.seed,
       teamCount: this.field?.teamCount ?? DEFAULT_TEAMS,
       botCount: this.field?.botCount ?? DEFAULT_BOTS,
+      kaijiShare: this.kaijiShare,
+      kaijiPopulation: this.field ? this.field.bots.filter((bot) => bot.playsKaiji).length : 0,
       matchDeadline: this.matchDeadline,
       handDeadline: this.handDeadline,
       matchesCompleted: this.matchesCompleted,
@@ -313,12 +324,13 @@ export class SimController {
     };
   }
 
-  private playerLadder(limit: number): { rows: LadderRow[]; kaijiRank: number; fieldSize: number } {
+  private playerLadder(): { rows: LadderRow[]; kaijiRank: number; fieldSize: number } {
     const entries: Array<Omit<LadderRow, "rank">> = [
-      { name: "Kaiji", style: "Kaiji", elo: this.kaijiElo, matches: this.kaijiMatches, isHero: true },
+      { id: "kaiji", name: "Kaiji", style: "Kaiji", elo: this.kaijiElo, matches: this.kaijiMatches, isHero: true },
     ];
     for (const bot of this.field?.bots ?? []) {
       entries.push({
+        id: bot.id,
         name: bot.name,
         style: bot.playsKaiji ? "Kaiji chart" : TIER_LABEL[bot.tier],
         elo: bot.elo,
@@ -326,18 +338,11 @@ export class SimController {
         isHero: false,
       });
     }
-    entries.sort((a, b) => b.elo - a.elo || a.name.localeCompare(b.name));
-    let lastElo = Number.POSITIVE_INFINITY;
-    let lastRank = 0;
-    const ranked = entries.map((row, index) => {
-      const rank = row.elo === lastElo ? lastRank : index + 1;
-      lastElo = row.elo;
-      lastRank = rank;
-      return { ...row, rank };
-    });
+    entries.sort((a, b) => b.elo - a.elo || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    const ranked = entries.map((row, index) => ({ ...row, rank: index + 1 }));
     const hero = ranked.find((row) => row.isHero);
     return {
-      rows: ranked.slice(0, limit),
+      rows: ranked,
       kaijiRank: hero?.rank ?? ranked.length,
       fieldSize: ranked.length,
     };
@@ -440,6 +445,7 @@ export class SimController {
 
   private applyNew(seed: string, teamCount: number, botCount: number, cleared: boolean): void {
     this.field = generateField(seed, teamCount, botCount);
+    applyKaijiPopulation(this.field, this.kaijiShare);
     this.seed = seed;
     this.rng = new Rng(hashString(`${seed}:sim`) ^ 0x51d0);
     this.blindsMixed = false;
@@ -471,6 +477,8 @@ export class SimController {
     const problem = validateField(saved.teamCount, saved.botCount);
     if (problem) throw new Error(problem);
     this.field = generateField(saved.seed, saved.teamCount, saved.botCount);
+    this.kaijiShare = saved.kaijiShare ?? 0;
+    applyKaijiPopulation(this.field, this.kaijiShare);
     this.seed = saved.seed;
     for (const bot of this.field.bots) {
       if (typeof saved.elos[bot.id] === "number") bot.elo = saved.elos[bot.id];
@@ -753,6 +761,7 @@ export class SimController {
       seed: this.seed,
       teamCount: this.field.teamCount,
       botCount: this.field.botCount,
+      kaijiShare: this.kaijiShare,
       blinds: this.blinds,
       blindsMixed: this.blindsMixed,
       matchDeadline: this.matchDeadline,

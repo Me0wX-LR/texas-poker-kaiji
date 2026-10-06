@@ -5,9 +5,10 @@ import { PlayingCard } from "@/components/cards";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { asset, formatChips } from "@/lib/constants";
-import { HandMachine, type Decision } from "@/lib/hand";
+import { HandMachine, type Act, type Decision } from "@/lib/hand";
 import { kaijiDecision } from "@/lib/kaiji";
 import { Rng, hashString } from "@/lib/rng";
+import { TableAudio, handResult } from "@/lib/table-audio";
 
 const STREETS = ["Preflop", "Flop", "Turn", "River"];
 
@@ -20,7 +21,28 @@ export function HeadsUp({ blinds }: { blinds: boolean }) {
   const [dealt, setDealt] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [sizing, setSizing] = useState<number[] | null>(null);
+  const [soundOn, setSoundOn] = useState(true);
+  const audio = useRef<TableAudio | null>(null);
+  const heardTurn = useRef(false);
+  const rootRef = useRef<HTMLElement | null>(null);
+  if (!audio.current && typeof window !== "undefined") audio.current = new TableAudio();
   const refresh = () => setTick((value) => value + 1);
+
+  useEffect(() => {
+    const table = audio.current ?? new TableAudio();
+    audio.current = table;
+    setSoundOn(!table.muted);
+    const node = rootRef.current;
+    const observer = node
+      ? new IntersectionObserver(([entry]) => table.setAudible(entry.isIntersecting), { threshold: 0.15 })
+      : null;
+    if (node && observer) observer.observe(node);
+    return () => {
+      observer?.disconnect();
+      table.dispose();
+      audio.current = null;
+    };
+  }, []);
 
   const hand = handRef.current;
 
@@ -30,6 +52,7 @@ export function HeadsUp({ blinds }: { blinds: boolean }) {
     const timer = window.setTimeout(() => {
       try {
         current.advance();
+        audio.current?.street();
         settle(current);
         refresh();
       } catch (cause) {
@@ -45,7 +68,9 @@ export function HeadsUp({ blinds }: { blinds: boolean }) {
     const timer = window.setTimeout(() => {
       try {
         const ctx = current.fillCtx(1);
-        current.act(1, kaijiDecision(ctx.hole0, ctx.hole1, ctx.board, ctx.street, ctx.toCall));
+        const decision = kaijiDecision(ctx.hole0, ctx.hole1, ctx.board, ctx.street, ctx.toCall);
+        current.act(1, decision);
+        voice(decision.act, current);
         settle(current);
         refresh();
       } catch (cause) {
@@ -63,12 +88,27 @@ export function HeadsUp({ blinds }: { blinds: boolean }) {
       currentNets[1] + current.stack[1] - 10000,
     ]);
     setDealt((count) => count + 1);
+    const result = handResult(current.stack[0]);
+    if (result === "win") audio.current?.win();
+    else if (result === "lose") audio.current?.lose();
   }
+
+function voice(actName: Act, current: HandMachine) {
+  if (actName === "allin") audio.current?.allIn();
+  else if (actName === "fold") audio.current?.fold();
+  else if (current.phase === "done") return;
+  else if (actName === "check") audio.current?.check();
+  else audio.current?.chips();
+}
 
   function deal() {
     setError(null);
     setSizing(null);
     accounted.current = false;
+    heardTurn.current = false;
+    audio.current?.unlock();
+    audio.current?.startMusic();
+    audio.current?.deal();
     handRef.current = new HandMachine({
       n: 2,
       button: dealt % 2,
@@ -84,6 +124,7 @@ export function HeadsUp({ blinds }: { blinds: boolean }) {
     if (!current || current.phase !== "act" || current.actor !== 0) return;
     try {
       current.act(0, decision);
+      voice(decision.act, current);
       setSizing(null);
       settle(current);
       refresh();
@@ -93,12 +134,23 @@ export function HeadsUp({ blinds }: { blinds: boolean }) {
   }
 
   const yourTurn = Boolean(hand && hand.phase === "act" && hand.actor === 0);
+  useEffect(() => {
+    if (yourTurn && !heardTurn.current) audio.current?.yourTurn();
+    heardTurn.current = yourTurn;
+  }, [yourTurn, tick]);
   const legal = yourTurn && hand ? hand.legal(0) : null;
   const revealKaiji = Boolean(hand && hand.showdown);
   const street = hand ? STREETS[hand.street] ?? "Showdown" : "Waiting";
 
+  function toggleSound() {
+    const next = !soundOn;
+    setSoundOn(next);
+    audio.current?.setMuted(!next);
+    if (next && handRef.current) audio.current?.startMusic();
+  }
+
   return (
-    <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
+    <section ref={rootRef} className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <div className="felt relative rounded-[2rem] p-4 sm:p-6">
         <p className="pointer-events-none absolute inset-x-0 top-6 text-center font-display text-xs tracking-[0.4em] text-[#e2b657]/30">
           ざわ…ざわ…
@@ -113,9 +165,12 @@ export function HeadsUp({ blinds }: { blinds: boolean }) {
                 {blinds ? " Blinds are 50 and 100, and the button posts the small blind." : " Blinds are off. An all-check hand moves nothing."}
               </p>
             </div>
-            <Button size="lg" onClick={deal}>
-              Deal the hand
-            </Button>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button className="min-h-12" size="lg" onClick={deal}>
+                Deal the hand
+              </Button>
+              <SoundButton on={soundOn} onToggle={toggleSound} />
+            </div>
           </div>
         ) : (
           <div className="mx-auto flex min-h-72 max-w-xl flex-col items-center gap-4 pt-8">
@@ -232,14 +287,25 @@ export function HeadsUp({ blinds }: { blinds: boolean }) {
 
       <aside className="flex flex-col gap-3">
         <div className="rounded-xl border bg-card p-3">
-          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Session chips</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Session chips</p>
+            <SoundButton on={soundOn} onToggle={toggleSound} />
+          </div>
           <p className="mt-1 text-sm">You {formatChips(nets[0])}</p>
           <p className="text-sm">Kaiji {formatChips(nets[1])}</p>
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-            {dealt} hand{dealt === 1 ? "" : "s"} dealt. Kaiji still only checks or shoves. This table does not move the ladder.
+            {dealt} hand{dealt === 1 ? "" : "s"} dealt. Kaiji still only checks or shoves. This table does not move the ladder. Sound is a pulse under the hand, plus a hit for cards, chips, an all-in, and the result.
           </p>
         </div>
       </aside>
     </section>
+  );
+}
+
+function SoundButton({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  return (
+    <Button type="button" className="min-h-11" variant={on ? "default" : "outline"} onClick={onToggle}>
+      {on ? "Sound on" : "Sound off"}
+    </Button>
   );
 }

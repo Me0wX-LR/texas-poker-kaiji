@@ -17,6 +17,8 @@ export interface SaveData {
   seed: string;
   teamCount: number;
   botCount: number;
+  /** Percent of bots who play Kaiji's chart. Older saves omit this and stay at 0. */
+  kaijiShare?: number;
   blinds: boolean;
   blindsMixed: boolean;
   matchDeadline: number;
