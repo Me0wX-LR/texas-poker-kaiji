@@ -427,6 +427,14 @@ function voice(actName: Act, current: HandMachine) {
   );
 }
 
+function poolLabel(pool: PracticePool): string {
+  if (pool === "random") return "Random match";
+  if (pool === "kaiji") return "Kaiji";
+  if (pool === "kaiji-chart") return "Kaiji chart copies";
+  if (pool.startsWith("style:")) return pool.slice("style:".length);
+  return `Any ${TIER_LABEL[pool as keyof typeof TIER_LABEL]}`;
+}
+
 function MatchPicker({
   pool,
   setPool,
@@ -436,33 +444,65 @@ function MatchPicker({
   setPool: (pool: PracticePool) => void;
   opponent: PracticeSeat | null;
 }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointer(event: PointerEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  function choose(next: PracticePool) {
+    setPool(next);
+    setOpen(false);
+  }
+
   return (
-    <div className="rounded-xl border bg-card p-3">
-      <label htmlFor="match-pool" className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+    <div ref={menuRef} className="rounded-xl border bg-card p-3">
+      <p id="match-label" className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
         Match
-      </label>
-      <select
+      </p>
+      <button
         id="match-pool"
-        className="mt-2 min-h-11 w-full rounded-lg border border-input bg-transparent px-2.5 text-base"
-        value={pool}
-        onChange={(event) => setPool(event.target.value as PracticePool)}
+        type="button"
+        aria-labelledby="match-label"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        className="mt-2 flex min-h-11 w-full items-center justify-between gap-3 rounded-lg border border-input bg-[#221812] px-2.5 text-left text-base text-[#f3e6d0]"
+        onClick={() => setOpen((value) => !value)}
       >
-        <option value="random">Random match</option>
-        <option value="kaiji">Kaiji</option>
-        <option value="kaiji-chart">Kaiji chart copies</option>
-        {PRACTICE_GROUPS.map((group) => (
-          <optgroup key={group.tier} label={TIER_LABEL[group.tier]}>
-            <option value={group.tier}>Any {TIER_LABEL[group.tier]}</option>
-            {group.personalities.length > 1
-              ? group.personalities.map((name) => (
-                  <option key={name} value={`style:${name}`}>
-                    {name}
-                  </option>
-                ))
-              : null}
-          </optgroup>
-        ))}
-      </select>
+        <span className="truncate">{poolLabel(pool)}</span>
+        <span aria-hidden="true" className="text-[#e2b657]">{open ? "▴" : "▾"}</span>
+      </button>
+      {open ? (
+        <div role="listbox" aria-labelledby="match-label" className="mt-2 max-h-72 overflow-auto rounded-lg border border-[#4a382c] bg-[#221812] p-1">
+          <MenuChoice pool={pool} value="random" label="Random match" onPick={choose} />
+          <MenuChoice pool={pool} value="kaiji" label="Kaiji" onPick={choose} />
+          <MenuChoice pool={pool} value="kaiji-chart" label="Kaiji chart copies" onPick={choose} />
+          {PRACTICE_GROUPS.map((group) => (
+            <div key={group.tier}>
+              <p className="px-2 pt-2 text-[10px] uppercase tracking-[0.16em] text-[#c4b39a]">{TIER_LABEL[group.tier]}</p>
+              <MenuChoice pool={pool} value={group.tier} label={`Any ${TIER_LABEL[group.tier]}`} onPick={choose} />
+              {group.personalities.length > 1
+                ? group.personalities.map((name) => (
+                    <MenuChoice key={name} pool={pool} value={`style:${name}`} label={name} onPick={choose} />
+                  ))
+                : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
       <p className="mt-2 text-sm">
         {opponent ? (
           <>
@@ -476,6 +516,31 @@ function MatchPicker({
         Random draws anyone in the field. A style or a personality draws one player of that type. Next hand stays with them. New opponent draws again. Both of you are rated after 240 hands. Everyone else keeps playing in the background.
       </p>
     </div>
+  );
+}
+
+function MenuChoice({
+  pool,
+  value,
+  label,
+  onPick,
+}: {
+  pool: PracticePool;
+  value: PracticePool;
+  label: string;
+  onPick: (pool: PracticePool) => void;
+}) {
+  const selected = pool === value;
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      className={`flex min-h-11 w-full items-center rounded-md px-2 text-left text-base ${selected ? "bg-[#3a2c22] text-[#e2b657]" : "text-[#f3e6d0]"}`}
+      onClick={() => onPick(value)}
+    >
+      {label}
+    </button>
   );
 }
 

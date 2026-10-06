@@ -124,6 +124,7 @@
   html {
     @apply font-sans;
     -webkit-text-size-adjust: 100%;
+    color-scheme: dark;
   }
   body {
     @apply bg-background text-foreground;
@@ -137,6 +138,16 @@
   input,
   label {
     touch-action: manipulation;
+  }
+  select {
+    color-scheme: dark;
+    background-color: #221812;
+    color: #f3e6d0;
+  }
+  select option,
+  select optgroup {
+    background-color: #221812;
+    color: #f3e6d0;
   }
 }
 
