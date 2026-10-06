@@ -24,6 +24,10 @@ export interface SaveData {
   matchesCompleted: number;
   handsPlayed: number;
   kaijiMatches: number;
+  /** Rated matches in which Kaiji tied or took the best chip result. */
+  kaijiWins?: number;
+  /** kaijiMatches already finished before win tracking started. Older saves omit this. */
+  winrateFrom?: number;
   kaijiElo: number;
   kaijiChips: number;
   tierChips: Record<Tier, number>;

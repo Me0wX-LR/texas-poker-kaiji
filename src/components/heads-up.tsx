@@ -165,39 +165,39 @@ export function HeadsUp({ blinds }: { blinds: boolean }) {
                 ))}
               </div>
             </div>
-            <div className="sticky bottom-2 z-20 w-full rounded-xl border border-black/50 bg-[#08281e]/95 p-2 backdrop-blur">
+            <div className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 w-full rounded-xl border border-black/50 bg-[#08281e]/95 p-2 backdrop-blur">
               {error ? <p className="mb-2 text-sm text-[#ffb4b4]">{error}</p> : null}
               {hand.phase === "done" ? (
-                <Button className="w-full" onClick={deal}>
+                <Button className="min-h-12 w-full text-base" onClick={deal}>
                   Next hand
                 </Button>
               ) : null}
               {yourTurn && legal ? (
                 <div className="grid grid-cols-2 gap-2">
                   {legal.canFold ? (
-                    <Button variant="outline" onClick={() => act({ act: "fold" })}>
+                    <Button className="min-h-12 text-base" variant="outline" onClick={() => act({ act: "fold" })}>
                       Fold
                     </Button>
                   ) : null}
                   {legal.canCheck ? (
-                    <Button variant="outline" onClick={() => act({ act: "check" })}>
+                    <Button className="min-h-12 text-base" variant="outline" onClick={() => act({ act: "check" })}>
                       Check
                     </Button>
                   ) : null}
                   {legal.canCall ? (
-                    <Button onClick={() => act({ act: "call" })}>Call {legal.toCall.toLocaleString("en-US")}</Button>
+                    <Button className="min-h-12 text-base" onClick={() => act({ act: "call" })}>Call {legal.toCall.toLocaleString("en-US")}</Button>
                   ) : null}
                   {legal.canBet ? (
-                    <Button variant="secondary" onClick={() => setSizing([legal.minBetTo])}>
+                    <Button className="min-h-12 text-base" variant="secondary" onClick={() => setSizing([legal.minBetTo])}>
                       Bet
                     </Button>
                   ) : null}
                   {legal.canRaise ? (
-                    <Button variant="secondary" onClick={() => setSizing([legal.minRaiseTo])}>
+                    <Button className="min-h-12 text-base" variant="secondary" onClick={() => setSizing([legal.minRaiseTo])}>
                       Raise
                     </Button>
                   ) : null}
-                  <Button className="col-span-2" onClick={() => act({ act: "allin" })}>
+                  <Button className="col-span-2 min-h-12 text-base" onClick={() => act({ act: "allin" })}>
                     All-in {legal.maxTo.toLocaleString("en-US")}
                   </Button>
                 </div>
@@ -213,7 +213,7 @@ export function HeadsUp({ blinds }: { blinds: boolean }) {
                     onValueChange={(value) => setSizing(Array.isArray(value) ? [...value] : [value])}
                   />
                   <Button
-                    className="mt-3 w-full"
+                    className="mt-3 min-h-12 w-full text-base"
                     onClick={() => act(legal.canBet ? { act: "bet", to: sizing[0] } : { act: "raise", to: sizing[0] })}
                   >
                     Confirm

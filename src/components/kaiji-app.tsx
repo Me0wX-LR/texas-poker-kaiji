@@ -21,7 +21,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DEFAULT_MATCH_DEADLINE,
   HANDS_PER_MATCH,
-  INITIAL_ELO,
   TIER_LABEL,
   TIERS,
   asset,
@@ -32,7 +31,6 @@ import {
 import { SimController, type SimSnap } from "@/lib/controller";
 import type { HistoryPoint } from "@/lib/storage";
 
-const TEAM_COLORS = ["#ff5d5d", "#e2b657", "#7dcea0", "#5dade2", "#c39bd3", "#f5b041", "#85c1e9", "#f1948a", "#73c6b6", "#f7dc6f", "#d2b4de", "#aeb6bf"];
 const TIER_COLORS: Record<(typeof TIERS)[number], string> = {
   gto: "#7dcea0",
   dynamic: "#5dade2",
@@ -46,8 +44,8 @@ export function KaijiApp() {
   const [snap, setSnap] = useState<SimSnap | null>(null);
   const [setupOpen, setSetupOpen] = useState(false);
   const [seed, setSeed] = useState("kaiji-2026");
-  const [teams, setTeams] = useState("7");
   const [bots, setBots] = useState("1200");
+  const [ladderCut, setLadderCut] = useState<20 | 100>(20);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [matchDraft, setMatchDraft] = useState(String(DEFAULT_MATCH_DEADLINE));
   const [deadlineFocus, setDeadlineFocus] = useState(false);
@@ -71,15 +69,6 @@ export function KaijiApp() {
   }, [snap, deadlineFocus]);
 
   const hits = simRef.current?.findBots(query) ?? [];
-
-  const teamLines = useMemo<ChartLine[]>(() => {
-    if (!snap) return [];
-    return snap.teamNames.map((name, index) => ({
-      name,
-      color: TEAM_COLORS[index % TEAM_COLORS.length],
-      value: (point: HistoryPoint) => point.teams[index] ?? point.kaiji,
-    }));
-  }, [snap]);
 
   const tierLines = useMemo<ChartLine[]>(() => {
     if (!snap) return [];
@@ -136,7 +125,7 @@ export function KaijiApp() {
   const matchStopCopy = `${shownMatches.toLocaleString("en-US")} ${matchWord} = ${(shownMatches * HANDS_PER_MATCH).toLocaleString("en-US")} hands`;
 
   function submitSetup() {
-    const message = simRef.current?.newRun(seed, Number(teams), Number(bots)) ?? "The table is not ready.";
+    const message = simRef.current?.newRun(seed, Number(bots)) ?? "The table is not ready.";
     if (message) setSetupError(message);
     else {
       setSetupError(null);
@@ -145,17 +134,24 @@ export function KaijiApp() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-4 px-3 py-4 sm:px-6">
+    <main className="mx-auto flex min-h-dvh w-full max-w-6xl flex-col gap-4 px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6">
       <header className="flex flex-wrap items-center gap-3">
-        <img src={asset("/kaiji.png")} alt="Kaiji" className="pixel-art size-14 border-2 border-black shadow-[3px_3px_0_#000]" />
+        <img src={asset("/kaiji.png")} alt="Kaiji" className="pixel-art size-12 border-2 border-black shadow-[3px_3px_0_#000] sm:size-14" />
         <div className="min-w-0 flex-1">
           <p className="font-display text-[10px] tracking-[0.35em] text-[#e2b657]">ざわ…ざわ…</p>
           <h1 className="font-display text-sm sm:text-base">Texas Poker Kaiji</h1>
-          <p className="text-sm text-muted-foreground">A static shove, sat against a field that is allowed to change its mind.</p>
+          <p className="hidden text-sm text-muted-foreground sm:block">A static shove, sat against a field that is allowed to change its mind.</p>
         </div>
-        <div className="rounded-xl border bg-card px-3 py-2 text-right">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{snap.locked ? "Locked Elo" : "Kaiji Elo"}</p>
-          <p className="font-display text-lg text-[#ff5d5d]">{formatElo(snap.kaijiElo)}</p>
+        <div className="ml-auto flex gap-2">
+          <div className="min-w-[5.5rem] rounded-xl border bg-card px-3 py-2 text-right">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Win rate</p>
+            <p className="font-display text-lg text-[#e2b657]">{winRateLabel(snap)}</p>
+            <p className="text-[10px] text-muted-foreground">{winRateDetail(snap)}</p>
+          </div>
+          <div className="min-w-[5.5rem] rounded-xl border bg-card px-3 py-2 text-right">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{snap.locked ? "Locked Elo" : "Kaiji Elo"}</p>
+            <p className="font-display text-lg text-[#ff5d5d]">{formatElo(snap.kaijiElo)}</p>
+          </div>
         </div>
       </header>
 
@@ -175,14 +171,14 @@ export function KaijiApp() {
       <section className="grid gap-3 rounded-xl border bg-card p-3">
         <div className="flex flex-wrap items-center gap-2">
           {snap.running ? (
-            <Button onClick={() => simRef.current?.pause()}>Pause</Button>
+            <Button className="min-h-11" onClick={() => simRef.current?.pause()}>Pause</Button>
           ) : (
-            <Button onClick={() => simRef.current?.start()} disabled={snap.locked || snap.phase === "error"}>
+            <Button className="min-h-11" onClick={() => simRef.current?.start()} disabled={snap.locked || snap.phase === "error"}>
               {snap.handsPlayed === 0 ? "Open the table" : "Deal"}
             </Button>
           )}
           {[1, 10, 100, 1000].map((preset) => (
-            <Button key={preset} variant={snap.speed === preset ? "default" : "outline"} onClick={() => simRef.current?.setSpeed(preset)}>
+            <Button key={preset} className="min-h-11 min-w-11" variant={snap.speed === preset ? "default" : "outline"} onClick={() => simRef.current?.setSpeed(preset)}>
               {preset}×
             </Button>
           ))}
@@ -226,10 +222,10 @@ export function KaijiApp() {
             <p>240 hands per match</p>
           </div>
           <Button
+            className="min-h-11"
             variant="outline"
             onClick={() => {
               setSeed(snap.seed);
-              setTeams(String(snap.teamCount));
               setBots(String(snap.botCount));
               setSetupError(null);
               setSetupOpen(true);
@@ -254,17 +250,21 @@ export function KaijiApp() {
 
       <Tabs defaultValue="table">
         <TabsList className="flex h-auto w-full flex-wrap">
-          <TabsTrigger value="table">The table</TabsTrigger>
-          <TabsTrigger value="experiment">Experiment</TabsTrigger>
-          <TabsTrigger value="heads">Heads-up</TabsTrigger>
-          <TabsTrigger value="rules">Rules</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3" value="table">The table</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3" value="ladder">Ladder</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3" value="experiment">Experiment</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3" value="heads">Heads-up</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3" value="rules">Rules</TabsTrigger>
         </TabsList>
 
         <TabsContent value="table" className="mt-3">
           <TablePanel snap={snap} />
         </TabsContent>
+        <TabsContent value="ladder" className="mt-3">
+          <LadderPanel snap={snap} cut={ladderCut} setCut={setLadderCut} />
+        </TabsContent>
         <TabsContent value="experiment" className="mt-3 space-y-4">
-          <ExperimentPanel snap={snap} teamLines={teamLines} tierLines={tierLines} chipLines={chipLines} query={query} setQuery={setQuery} hits={hits} />
+          <ExperimentPanel snap={snap} tierLines={tierLines} chipLines={chipLines} query={query} setQuery={setQuery} hits={hits} />
         </TabsContent>
         <TabsContent value="heads" className="mt-3">
           <HeadsUp blinds={snap.blinds} />
@@ -287,26 +287,20 @@ export function KaijiApp() {
               <Label htmlFor="seed">Seed</Label>
               <Input id="seed" value={seed} onChange={(event) => setSeed(event.target.value)} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1">
-                <Label htmlFor="teams">Teams</Label>
-                <Input id="teams" inputMode="numeric" value={teams} onChange={(event) => setTeams(event.target.value)} />
-              </div>
-              <div className="grid gap-1">
-                <Label htmlFor="bots">Bots</Label>
-                <Input id="bots" inputMode="numeric" value={bots} onChange={(event) => setBots(event.target.value)} />
-              </div>
+            <div className="grid gap-1">
+              <Label htmlFor="bots">Players</Label>
+              <Input id="bots" inputMode="numeric" value={bots} onChange={(event) => setBots(event.target.value)} />
             </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Team 1 is Kaiji. Teams 2 onward split the bots and each must hold every tier. Use 6 to 12 teams and at least 1,000 bots.
+              At least 1,000 players, default 1,200. Kaiji sits with five of them drawn from that field. The same seed repeats the deals. There are no teams.
             </p>
             {setupError ? <p className="text-sm text-[#ffb4b4]">{setupError}</p> : null}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSetupOpen(false)}>
+            <Button className="min-h-11" variant="outline" onClick={() => setSetupOpen(false)}>
               Keep playing
             </Button>
-            <Button onClick={submitSetup}>Reset the ladder</Button>
+            <Button className="min-h-11" onClick={submitSetup}>Reset the ladder</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -362,7 +356,7 @@ function TablePanel({ snap }: { snap: SimSnap }) {
                     {seat.isButton ? " · BTN" : ""}
                   </p>
                   <p className="truncate text-[11px] text-[#d5c7ae]">
-                    {seat.team} · {formatElo(seat.elo)}
+                    {seat.style} · {formatElo(seat.elo)}
                     {seat.isActor ? " · to act" : ""}
                     {seat.allin ? " · all-in" : ""}
                   </p>
@@ -393,9 +387,80 @@ function TablePanel({ snap }: { snap: SimSnap }) {
   );
 }
 
+function winRateLabel(snap: SimSnap): string {
+  if (snap.winrateTracked <= 0) return "—";
+  return `${Math.round((snap.kaijiWins / snap.winrateTracked) * 100)}%`;
+}
+
+function winRateDetail(snap: SimSnap): string {
+  if (snap.winrateTracked <= 0) return snap.kaijiMatches > 0 ? "from the next match" : "no match yet";
+  return `${snap.kaijiWins} / ${snap.winrateTracked} first`;
+}
+
+function LadderPanel({
+  snap,
+  cut,
+  setCut,
+}: {
+  snap: SimSnap;
+  cut: 20 | 100;
+  setCut: (cut: 20 | 100) => void;
+}) {
+  const rows = snap.ladder.slice(0, cut);
+  const kaijiShown = rows.some((row) => row.isHero);
+  return (
+    <section className="rounded-xl border bg-card p-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="font-display text-[10px] text-[#e2b657]">By player</p>
+          <h2 className="mt-1 text-lg">The ladder</h2>
+        </div>
+        <div className="flex gap-2">
+          <Button className="min-h-11" variant={cut === 20 ? "default" : "outline"} onClick={() => setCut(20)}>
+            Top 20
+          </Button>
+          <Button className="min-h-11" variant={cut === 100 ? "default" : "outline"} onClick={() => setCut(100)}>
+            Top 100
+          </Button>
+        </div>
+      </div>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+        Each row is one player. Rank is that player&apos;s own Elo, not a style total. Kaiji is rank {snap.kaijiRank.toLocaleString("en-US")} of {snap.fieldSize.toLocaleString("en-US")}.
+        {snap.matchesCompleted === 0 ? " Nobody has been rated yet, so the room is still tied at 1,500 and the order is by name." : ""}
+      </p>
+      <div className="mt-3 max-h-[70dvh] overflow-auto">
+        <table className="w-full min-w-[20rem] text-left text-sm">
+          <thead className="sticky top-0 bg-card text-xs uppercase tracking-wide text-muted-foreground">
+            <tr>
+              <th className="py-2 pr-3 font-medium">Rank</th>
+              <th className="py-2 pr-3 font-medium">Player</th>
+              <th className="py-2 pr-3 font-medium">Style</th>
+              <th className="py-2 pr-3 font-medium">Elo</th>
+              <th className="py-2 font-medium">Matches</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={`${row.rank}-${row.name}`} className={`border-t ${row.isHero ? "bg-[#3a1818]" : ""}`}>
+                <td className="py-2 pr-3 tabular-nums">{row.rank}</td>
+                <td className="py-2 pr-3">{row.name}</td>
+                <td className="py-2 pr-3 text-muted-foreground">{row.style}</td>
+                <td className="py-2 pr-3 tabular-nums">{formatElo(row.elo)}</td>
+                <td className="py-2 tabular-nums">{row.matches.toLocaleString("en-US")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!kaijiShown ? (
+        <p className="mt-3 text-sm text-muted-foreground">Kaiji is outside this cut, at rank {snap.kaijiRank.toLocaleString("en-US")}.</p>
+      ) : null}
+    </section>
+  );
+}
+
 function ExperimentPanel({
   snap,
-  teamLines,
   tierLines,
   chipLines,
   query,
@@ -403,7 +468,6 @@ function ExperimentPanel({
   hits,
 }: {
   snap: SimSnap;
-  teamLines: ChartLine[];
   tierLines: ChartLine[];
   chipLines: ChartLine[];
   query: string;
@@ -429,13 +493,6 @@ function ExperimentPanel({
         </section>
       ) : (
         <>
-          <section className="rounded-xl border bg-card p-4">
-            <h3 className="text-base">Kaiji against the teams</h3>
-            <p className="mb-2 text-xs text-muted-foreground">
-              Every line is one rating. Kaiji is himself. Each other line is the average rating of that team&apos;s players who have already sat a rated match. A team does not get to add every member&apos;s Elo change into one score.
-            </p>
-            <LineChart points={snap.history} lines={teamLines} empty="" />
-          </section>
           <section className="rounded-xl border bg-card p-4">
             <h3 className="text-base">Kaiji against the four tiers</h3>
             <p className="mb-2 text-xs text-muted-foreground">
@@ -499,13 +556,6 @@ function ExperimentPanel({
         ) : (
           <p className="mt-3 text-sm text-muted-foreground">No comparison yet. The friend&apos;s claim is still untested on this seed.</p>
         )}
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          {snap.teamNames.map((name, index) => (
-            <p key={name} className="text-sm">
-              <span className="text-muted-foreground">{name}.</span> {formatElo(snap.teamElos[index] ?? INITIAL_ELO)}
-            </p>
-          ))}
-        </div>
       </section>
 
       <section className="rounded-xl border bg-card p-4">
@@ -533,7 +583,7 @@ function ExperimentPanel({
                   {hit.name} <span className="text-muted-foreground">· {hit.id}</span>
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {hit.team} · {TIER_LABEL[hit.tier]} · Elo {formatElo(hit.elo)} · {hit.matches} rated
+                  {hit.style} · Elo {formatElo(hit.elo)} · {hit.matches} rated
                 </p>
                 <p className="text-xs text-muted-foreground">{hit.note}</p>
               </li>
@@ -578,7 +628,7 @@ function RulesPanel() {
       <section className="rounded-xl border bg-card p-4">
         <h2 className="text-base">Who else is in the room</h2>
         <p className="mt-2 text-muted-foreground">
-          Seven teams by default. Team 1 is only Kaiji. The other teams split at least a thousand generated variants, and each of those teams holds all four tiers: a fast GTO-style chart, dynamic bots whose tightness and aggression move with their Elo and the table&apos;s Elo, frozen personalities fixed at creation, and adapters that rewrite thresholds from showdown rate, fold-to-shove, and aggression they actually saw. Each match seats six of the teams and rotates who sits out. A non-Kaiji seat draws one variant for the whole match. Heads-up is a side game and does not touch these ratings. Ratings stay in localStorage.
+          The field is individual players, at least a thousand of them. There are no teams. Four styles share that field: a fast GTO-style chart, dynamic bots whose tightness and aggression move with their own Elo and the table&apos;s Elo, frozen personalities fixed at creation, and adapters that rewrite thresholds from showdown rate, fold-to-shove, and aggression they actually saw. Each match draws Kaiji plus five of those players for all 240 hands. The ladder ranks each player by their own Elo. Win rate is the share of rated matches in which Kaiji tied or took the best chip result. Heads-up is a side game and does not touch these ratings. Ratings stay in localStorage.
         </p>
       </section>
       <section className="rounded-xl border bg-card p-4">

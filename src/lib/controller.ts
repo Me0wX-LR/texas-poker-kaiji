@@ -26,6 +26,7 @@ export interface SeatLabel {
   name: string;
   detail: string;
   team: string;
+  style: string;
   elo: number;
   isKaiji: boolean;
   folded: boolean;
@@ -55,11 +56,20 @@ export interface TableSnap {
 export interface BotHit {
   id: string;
   name: string;
-  team: string;
+  style: string;
   tier: Tier;
   elo: number;
   matches: number;
   note: string;
+}
+
+export interface LadderRow {
+  rank: number;
+  name: string;
+  style: string;
+  elo: number;
+  matches: number;
+  isHero: boolean;
 }
 
 export interface VerdictRow {
@@ -88,6 +98,9 @@ export interface SimSnap {
   matchesCompleted: number;
   handsPlayed: number;
   kaijiMatches: number;
+  kaijiWins: number;
+  /** Rated matches counted in the win rate. Older saves start this after the matches already played. */
+  winrateTracked: number;
   kaijiElo: number;
   kaijiChips: number;
   tierChips: Record<Tier, number>;
@@ -98,6 +111,9 @@ export interface SimSnap {
   teamElos: number[];
   teamPiles: number[];
   teamNames: string[];
+  ladder: LadderRow[];
+  kaijiRank: number;
+  fieldSize: number;
   history: HistoryPoint[];
   table: TableSnap | null;
   clock: string;
@@ -129,6 +145,8 @@ export class SimController {
   private matchesCompleted = 0;
   private handsPlayed = 0;
   private kaijiMatches = 0;
+  private kaijiWins = 0;
+  private winrateFrom = 0;
   private kaijiElo = INITIAL_ELO;
   private kaijiChips = 0;
   private tierChips = freshTierChips();
@@ -214,14 +232,14 @@ export class SimController {
     return null;
   }
 
-  newRun(seed: string, teamCount: number, botCount: number): string | null {
+  newRun(seed: string, botCount: number): string | null {
     const clean = seed.trim();
     if (!clean) return "The run needs a seed.";
-    const problem = validateField(teamCount, botCount);
+    const problem = validateField(DEFAULT_TEAMS, botCount);
     if (problem) return problem;
     this.pause();
     this.error = null;
-    this.applyNew(clean, teamCount, botCount, true);
+    this.applyNew(clean, DEFAULT_TEAMS, botCount, true);
     this.emit();
     return null;
   }
@@ -230,15 +248,15 @@ export class SimController {
     if (!this.field) return [];
     const q = query.trim().toLowerCase();
     const pool = q
-      ? this.field.bots.filter((bot) => {
-          const team = teamName(bot.team).toLowerCase();
-          return bot.name.toLowerCase().includes(q) || bot.id.includes(q) || team.includes(q) || bot.params.personality.toLowerCase().includes(q);
+        ? this.field.bots.filter((bot) => {
+          const style = (bot.playsKaiji ? "kaiji chart" : TIER_LABEL[bot.tier]).toLowerCase();
+          return bot.name.toLowerCase().includes(q) || bot.id.includes(q) || style.includes(q) || bot.params.personality.toLowerCase().includes(q);
         })
       : this.field.bots.slice(0, 8);
     return pool.slice(0, 36).map((bot) => ({
       id: bot.id,
       name: bot.name,
-      team: teamName(bot.team),
+      style: bot.playsKaiji ? "Kaiji chart" : TIER_LABEL[bot.tier],
       tier: bot.tier,
       elo: bot.elo,
       matches: bot.matches,
@@ -252,6 +270,7 @@ export class SimController {
     const teamElos = this.field ? teamMeans(this.field, this.kaijiElo) : [this.kaijiElo];
     const teamPiles = this.field ? teamPools(this.field, this.kaijiElo) : [this.kaijiElo];
     const teamNames = this.field ? Array.from({ length: this.field.teamCount }, (_, i) => teamName(i)) : ["Kaiji"];
+    const ladder = this.playerLadder(100);
     return {
       phase: !this.booted ? "loading" : this.error ? "error" : "ready",
       error: this.error,
@@ -270,6 +289,8 @@ export class SimController {
       matchesCompleted: this.matchesCompleted,
       handsPlayed: this.handsPlayed,
       kaijiMatches: this.kaijiMatches,
+      kaijiWins: this.kaijiWins,
+      winrateTracked: Math.max(0, this.kaijiMatches - this.winrateFrom),
       kaijiElo: this.kaijiElo,
       kaijiChips: this.kaijiChips,
       tierChips: { ...this.tierChips },
@@ -279,6 +300,9 @@ export class SimController {
       teamElos,
       teamPiles,
       teamNames,
+      ladder: ladder.rows,
+      kaijiRank: ladder.kaijiRank,
+      fieldSize: ladder.fieldSize,
       history: this.history,
       table: this.tableSnap(),
       clock: this.clockText(),
@@ -286,6 +310,36 @@ export class SimController {
       lockCopy: this.locked ? this.lockText() : null,
       restored: this.restored,
       tierCounts: this.tierCounts,
+    };
+  }
+
+  private playerLadder(limit: number): { rows: LadderRow[]; kaijiRank: number; fieldSize: number } {
+    const entries: Array<Omit<LadderRow, "rank">> = [
+      { name: "Kaiji", style: "Kaiji", elo: this.kaijiElo, matches: this.kaijiMatches, isHero: true },
+    ];
+    for (const bot of this.field?.bots ?? []) {
+      entries.push({
+        name: bot.name,
+        style: bot.playsKaiji ? "Kaiji chart" : TIER_LABEL[bot.tier],
+        elo: bot.elo,
+        matches: bot.matches,
+        isHero: false,
+      });
+    }
+    entries.sort((a, b) => b.elo - a.elo || a.name.localeCompare(b.name));
+    let lastElo = Number.POSITIVE_INFINITY;
+    let lastRank = 0;
+    const ranked = entries.map((row, index) => {
+      const rank = row.elo === lastElo ? lastRank : index + 1;
+      lastElo = row.elo;
+      lastRank = rank;
+      return { ...row, rank };
+    });
+    const hero = ranked.find((row) => row.isHero);
+    return {
+      rows: ranked.slice(0, limit),
+      kaijiRank: hero?.rank ?? ranked.length,
+      fieldSize: ranked.length,
     };
   }
 
@@ -370,6 +424,7 @@ export class SimController {
         name: card.bot ? card.bot.name : "Kaiji",
         detail: card.bot ? this.botNote(card.bot) : "Static chart. Never updates.",
         team: teamName(card.team),
+        style: !card.bot ? "Kaiji" : card.asKaiji ? "Kaiji chart" : TIER_LABEL[card.bot.tier],
         elo: card.bot ? card.bot.elo : this.kaijiElo,
         isKaiji: card.bot === null,
         folded: folded[i] ?? false,
@@ -392,6 +447,8 @@ export class SimController {
     this.matchesCompleted = 0;
     this.handsPlayed = 0;
     this.kaijiMatches = 0;
+    this.kaijiWins = 0;
+    this.winrateFrom = 0;
     this.kaijiElo = INITIAL_ELO;
     this.kaijiChips = 0;
     this.tierChips = freshTierChips();
@@ -430,6 +487,8 @@ export class SimController {
     this.matchesCompleted = saved.matchesCompleted;
     this.handsPlayed = saved.handsPlayed;
     this.kaijiMatches = saved.kaijiMatches;
+    this.kaijiWins = saved.kaijiWins ?? 0;
+    this.winrateFrom = saved.winrateFrom ?? (saved.kaijiWins === undefined ? saved.kaijiMatches : 0);
     this.kaijiElo = saved.kaijiElo;
     this.kaijiChips = saved.kaijiChips;
     this.tierChips = { ...saved.tierChips };
@@ -655,7 +714,12 @@ export class SimController {
         live.seats[i].elo = next[i];
       }
     }
-    if (kaijiPlayed) this.kaijiMatches++;
+    if (kaijiPlayed) {
+      const kaijiSeat = live.seats.findIndex((seat) => seat.bot === null);
+      const best = Math.max(...live.nets);
+      if (kaijiSeat >= 0 && live.nets[kaijiSeat] === best) this.kaijiWins++;
+      this.kaijiMatches++;
+    }
     this.matchesCompleted++;
     this.history.push(this.historyPoint());
     this.live = null;
@@ -696,6 +760,8 @@ export class SimController {
       matchesCompleted: this.matchesCompleted,
       handsPlayed: this.handsPlayed,
       kaijiMatches: this.kaijiMatches,
+      kaijiWins: this.kaijiWins,
+      winrateFrom: this.winrateFrom,
       kaijiElo: this.kaijiElo,
       kaijiChips: this.kaijiChips,
       tierChips: this.tierChips,

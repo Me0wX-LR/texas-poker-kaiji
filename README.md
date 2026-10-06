@@ -21,7 +21,10 @@ Open [http://127.0.0.1:47221](http://127.0.0.1:47221).
 - **Blind bet required** posts 50/100. Off, nobody posts; an all-check hand moves 0 chips. The minimum opening bet stays 100.
 - **Heads-up** is you against Kaiji with the mouse. It does not move the ladder.
 - **Experiment** states the claim and plots Elo and chips from the run. The verdict is computed. A deadline locks Kaiji's final Elo.
-- **New run** sets the seed, team count (6–12, default 7), and bot count (at least 1,000, default 1,200). The same seed repeats the deals.
+- **New run** sets the seed and the player count (at least 1,000, default 1,200). There are no teams. The same seed repeats the deals.
+- **Ladder** ranks each player by their own Elo. Switch between the top 20 and the top 100.
+- **Win rate**, shown to the left of Kaiji's Elo, is the share of rated matches in which he tied or took the best chip result.
+- Phones can play it in Safari or Chrome. Add it to the home screen if you want it full screen. Heads-up buttons sit at the bottom of the felt.
 
 The default deadline is 1,008 matches: one match every 10 simulated minutes from 5 Oct 2026 00:00 UTC through the 23:50 UTC match on 11 Oct 2026. Each match is 240 hands, shown as read-only text. The hand stop is the match count times 240 (241,920 at the default) and updates when the match count changes. Either limit stops the run. A match cut off before 240 hands is not rated.
 
@@ -33,7 +36,7 @@ Everyone in this sim starts at 1,500. Place score for six players is `(6 − pla
 
 Odd chips in a split go to the first winner left of the button. A short all-in reopens betting. The Elo update is zero-sum at the table. Kaiji is one rating, and he is rated every match. Each tier line on the chart is the average rating of players of that style who have sat, not 1,500 plus the sum of all of them. That sum is shown separately as the group pile. A pile climbs faster than Kaiji because hundreds of small results are added together. A dynamic bot reads his own rating, not the pile.
 
-Team 1 is Kaiji and only plays the fixed chart. Each match seats six of the teams and rotates who sits out. Each other seat draws one variant for all 240 hands.
+Kaiji is one player and only plays the fixed chart. Each match draws him plus five other players from the field, and each of those seats keeps that player for all 240 hands.
 
 Kaiji preflop: all-in with any pocket pair or AK, AQ, AJ, AT (suited or offsuit); otherwise check if free, else fold. Postflop: all-in with top pair or better (top pair and overpair must use a hole card; two pair or better always shoves); otherwise check if free, else fold.
 
