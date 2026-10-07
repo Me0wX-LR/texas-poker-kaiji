@@ -30,6 +30,7 @@ import {
 } from "@/lib/constants";
 import { SimController, type LadderRow, type SimSnap } from "@/lib/controller";
 import { kaijiPopulationCount } from "@/lib/field";
+import { formatHandsPerSec, formatSpeed, sliderPosition, speedFromPosition, speedPresets } from "@/lib/pace";
 import { TIER_GRADES, type TierGrade, type TierListCard } from "@/lib/tier-list";
 import type { HistoryPoint } from "@/lib/storage";
 
@@ -181,23 +182,39 @@ export function KaijiApp() {
               {snap.handsPlayed === 0 ? "Open the table" : "Deal"}
             </Button>
           )}
-          {[1, 10, 100, 1000].map((preset) => (
-            <Button key={preset} className="min-h-11 min-w-11" variant={snap.speed === preset ? "default" : "outline"} onClick={() => simRef.current?.setSpeed(preset)}>
-              {preset}×
+          {speedPresets(snap.speedCap ?? 1).map((preset) => (
+            <Button
+              key={preset}
+              className="min-h-11 min-w-11 px-2"
+              variant={snap.speed === preset ? "default" : "outline"}
+              disabled={snap.speedCap == null && preset !== 1}
+              onClick={() => simRef.current?.setSpeed(preset)}
+            >
+              {formatSpeed(preset)}
             </Button>
           ))}
           <div className="min-w-40 flex-1">
             <Slider
-              min={1}
+              min={0}
               max={1000}
               step={1}
-              value={[snap.speed]}
-              onValueChange={(value) => simRef.current?.setSpeed(Array.isArray(value) ? value[0] : value)}
-              aria-label="Simulation speed"
+              disabled={snap.speedCap == null}
+              value={[sliderPosition(snap.speed, snap.speedCap ?? 1)]}
+              onValueChange={(value) => {
+                const position = Array.isArray(value) ? value[0] : value;
+                simRef.current?.setSpeed(speedFromPosition(position, snap.speedCap ?? 1));
+              }}
+              aria-label={`Simulation speed ${formatSpeed(snap.speed)}`}
             />
           </div>
-          <span className="w-14 text-right text-sm tabular-nums">{snap.speed}×</span>
+          <span className="min-w-16 text-right text-sm tabular-nums">{formatSpeed(snap.speed)}</span>
+          <span className="min-w-[7.5rem] text-right text-sm tabular-nums text-muted-foreground">
+            {snap.handsPerSec == null ? "— hands/s" : formatHandsPerSec(snap.handsPerSec)}
+          </span>
         </div>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {paceCopy(snap)}
+        </p>
         <div className="flex flex-wrap items-end gap-3">
           <Label className="gap-2 pb-1">
             <Switch checked={snap.blinds} onCheckedChange={(checked) => simRef.current?.setBlinds(checked)} />
@@ -415,6 +432,17 @@ function TablePanel({ snap }: { snap: SimSnap }) {
       )}
     </div>
   );
+}
+
+function paceCopy(snap: SimSnap): string {
+  const players = (snap.benchPlayers || snap.botCount).toLocaleString("en-US");
+  const blinds = (snap.benchPlayers ? snap.benchBlinds : snap.blinds) ? "blinds on" : "blinds off";
+  if (snap.speedCap == null) {
+    return `Measuring pace for ${snap.botCount.toLocaleString("en-US")} players, ${snap.blinds ? "blinds on" : "blinds off"}. 1× keeps dealing one action at a time.`;
+  }
+  const held = snap.benchHandsPerSec == null ? "" : ` It held ${formatHandsPerSec(snap.benchHandsPerSec)}.`;
+  const again = snap.pacing ? " Measuring the current room." : "";
+  return `Bench: ${players} players, ${blinds}. Solver GTO stays in the field. The slider stops at ${formatSpeed(snap.speedCap)}.${held}${again}`;
 }
 
 function winRateLabel(snap: SimSnap): string {

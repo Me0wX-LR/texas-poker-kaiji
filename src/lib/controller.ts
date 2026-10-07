@@ -20,6 +20,18 @@ import { kaijiDecision } from "./kaiji";
 import { SeatCard, drawRound, playHeadsUpMatch, playTableHand, rateTable } from "./match";
 import { decideBot, learnFromHand, type Bot } from "./policy";
 import { Rng, hashString } from "./rng";
+import {
+  BENCH_MS,
+  FRAME_BUDGET_MS,
+  WATCH_ACTION_MS,
+  WATCH_DEAL_MS,
+  WATCH_HOLD_MS,
+  WATCH_LAST_ACTION_MS,
+  WATCH_LAST_STREET_MS,
+  WATCH_SHOW_MS,
+  WATCH_STREET_MS,
+  measurePace,
+} from "./pace";
 import { HistoryPoint, SaveData, clearSave, loadSave, writeSave } from "./storage";
 import { assignGrades, collectStyles, type StyleSample, type TierListCard } from "./tier-list";
 
@@ -206,6 +218,16 @@ export interface SimSnap {
   tierCounts: Record<Tier, number>;
   /** Style grades for a locked run. Null until the deadline locks the ladder. */
   tierList: TierListCard[] | null;
+  /** Measured top speed. Null until the bench for this room finishes. */
+  speedCap: number | null;
+  /** Hands per second the table is actually finishing. */
+  handsPerSec: number | null;
+  /** Unthrottled hands per second from the bench. */
+  benchHandsPerSec: number | null;
+  benchPlayers: number;
+  benchBlinds: boolean;
+  /** A pace bench is in flight. */
+  pacing: boolean;
 }
 
 const EMPTY_TIERS: Record<Tier, number> = { gto: 0, dynamic: 0, frozen: 0, agentic: 0 };
@@ -221,6 +243,18 @@ export class SimController {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private speed = 1;
+  private speedCap: number | null = null;
+  private benchHandsPerSec: number | null = null;
+  private oneXHandsPerSec: number | null = null;
+  private benchPlayers = 0;
+  private benchBlinds = true;
+  private benchToken = 0;
+  private benchStale = false;
+  private pacing = false;
+  private achievedHandsPerSec: number | null = null;
+  private paceSample = { t: 0, hands: 0 };
+  private fastAnchor = 0;
+  private fastHandsAtAnchor = 0;
   private blinds = true;
   private blindsMixed = false;
   private blindMark: boolean | null = null;
@@ -282,6 +316,7 @@ export class SimController {
       this.error = error instanceof Error ? error.message : "The saved ladder could not be read.";
       this.booted = true;
     }
+    this.scheduleBench();
     this.emit();
   }
 
@@ -295,8 +330,11 @@ export class SimController {
 
   start(): void {
     if (this.locked || this.error || !this.field) return;
+    this.cancelBench();
     this.running = true;
     this.notice = null;
+    this.paceSample = { t: 0, hands: this.handsPlayed };
+    this.fastAnchor = 0;
     this.emit();
     this.arm(this.speed <= 1 ? 80 : 0);
   }
@@ -305,17 +343,22 @@ export class SimController {
     this.running = false;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (this.speedCap == null || this.benchStale) this.scheduleBench();
     this.emit();
   }
 
   setSpeed(speed: number): void {
-    this.speed = Math.max(1, Math.min(1000, Math.round(speed)));
+    const cap = this.speedCap ?? 1;
+    this.speed = Math.max(1, Math.min(cap, Math.round(speed)));
+    this.fastAnchor = 0;
     if (this.running) this.arm(this.speed <= 1 ? 80 : 0);
     this.emit();
   }
 
   setBlinds(blinds: boolean): void {
     this.blinds = blinds;
+    this.benchStale = true;
+    if (!this.running) this.scheduleBench();
     this.emit();
   }
 
@@ -463,7 +506,62 @@ export class SimController {
       restored: this.restored,
       tierCounts: this.tierCounts,
       tierList: this.styleTierList(),
+      speedCap: this.speedCap,
+      handsPerSec: this.achievedHandsPerSec,
+      benchHandsPerSec: this.benchHandsPerSec,
+      benchPlayers: this.benchPlayers,
+      benchBlinds: this.benchBlinds,
+      pacing: this.pacing,
     };
+  }
+
+  private cancelBench(): void {
+    this.benchToken++;
+    this.pacing = false;
+  }
+
+  /** Time a copy of this room. The live ladder, seed stream, and save are left alone. */
+  private scheduleBench(): void {
+    if (!this.field || this.running) {
+      this.benchStale = true;
+      return;
+    }
+    const token = ++this.benchToken;
+    const players = this.field.botCount;
+    const blinds = this.blinds;
+    const kaijiShare = this.kaijiShare;
+    const seed = this.seed;
+    const teams = this.field.teamCount;
+    this.benchStale = false;
+    if (this.benchPlayers !== players || this.benchBlinds !== blinds || this.speedCap == null) {
+      this.speedCap = null;
+      if (this.speed > 1) this.speed = 1;
+    }
+    this.pacing = true;
+    void measurePace({
+      seed,
+      players,
+      blinds,
+      kaijiShare,
+      teams,
+      benchMs: BENCH_MS,
+      cancelled: () => token !== this.benchToken,
+    }).then((report) => {
+      if (token !== this.benchToken) return;
+      this.pacing = false;
+      if (report.handsPerSec <= 0) return;
+      this.speedCap = report.maxSpeed;
+      this.benchHandsPerSec = report.handsPerSec;
+      this.oneXHandsPerSec = report.oneXHandsPerSec;
+      this.benchPlayers = report.players;
+      this.benchBlinds = report.blinds;
+      if (this.speed > report.maxSpeed) this.speed = report.maxSpeed;
+      this.emit();
+    }).catch(() => {
+      if (token !== this.benchToken) return;
+      this.pacing = false;
+      this.emit();
+    });
   }
 
   /** One card per style, graded only after the run locks. */
@@ -646,8 +744,12 @@ export class SimController {
     this.resultHold = false;
     this.notice = cleared ? "New run. Everyone is back at 1,500." : null;
     this.restored = false;
+    this.achievedHandsPerSec = null;
+    this.paceSample = { t: 0, hands: 0 };
+    this.fastAnchor = 0;
     this.countTiers();
     if (cleared) this.persist();
+    if (this.booted) this.scheduleBench();
   }
 
   private restore(saved: SaveData): void {
@@ -708,21 +810,13 @@ export class SimController {
       this.emit();
       return;
     }
-    let delay = this.speed <= 1 ? 460 : this.speed < 80 ? 32 : 0;
+    let delay = this.speed <= 1 ? WATCH_ACTION_MS : 0;
     try {
       if (this.speed <= 1) {
         delay = this.stepWatch();
+        this.noteAchieved(performance.now());
       } else {
-        const budget = this.speed >= 200 ? 16 : 10;
-        const target = this.speed >= 100 ? Math.ceil(this.speed / 4) : Math.max(1, Math.round(this.speed / 10));
-        const started = performance.now();
-        let count = 0;
-        while (count < target && performance.now() - started < budget && this.running && !this.locked) {
-          const before = this.handsPlayed;
-          this.stepFast();
-          if (this.handsPlayed === before) break;
-          count++;
-        }
+        delay = this.stepBatch();
       }
     } catch (error) {
       this.error = error instanceof Error ? error.message : "The hand broke.";
@@ -736,10 +830,10 @@ export class SimController {
     if (this.resultHold) {
       this.resultHold = false;
       this.hand = null;
-      return 420;
+      return WATCH_HOLD_MS;
     }
     if (!this.hand) {
-      if (!this.ensureMatch()) return 420;
+      if (!this.ensureMatch()) return WATCH_HOLD_MS;
       this.hand = new HandMachine({
         n: 6,
         button: this.live!.handsDone % 6,
@@ -751,17 +845,17 @@ export class SimController {
       this.foldedTo = Array.from({ length: 6 }, () => false);
       this.agg = 0;
       this.passive = 0;
-      return 360;
+      return WATCH_DEAL_MS;
     }
     if (this.hand.phase === "next-street") {
       this.hand.advance();
       const phase = this.hand.phase as "act" | "next-street" | "done";
-      return phase === "done" ? 700 : 420;
+      return phase === "done" ? WATCH_LAST_STREET_MS : WATCH_STREET_MS;
     }
     if (this.hand.phase === "done") {
       this.consumeMachine(this.hand);
       this.resultHold = true;
-      return 880;
+      return WATCH_SHOW_MS;
     }
     const seat = this.hand.actor;
     const ctx = this.hand.fillCtx(seat);
@@ -779,8 +873,50 @@ export class SimController {
     else this.passive++;
     this.hand.act(seat, decision);
     const phase = this.hand.phase as "act" | "next-street" | "done";
-    if (phase === "done") return 200;
-    return 460;
+    if (phase === "done") return WATCH_LAST_ACTION_MS;
+    return WATCH_ACTION_MS;
+  }
+
+  /**
+   * Play as many whole hands as the requested multiplier allows inside one slice,
+   * then yield. The slice matches the bench, so the top speed is a rate the tab held.
+   */
+  private stepBatch(): number {
+    const now = performance.now();
+    if (this.fastAnchor === 0) {
+      this.fastAnchor = now;
+      this.fastHandsAtAnchor = this.handsPlayed;
+    }
+    const cap = this.speedCap ?? this.speed;
+    const unthrottled = this.speed >= cap;
+    const rate = (this.oneXHandsPerSec ?? 0) * this.speed;
+    const elapsed = (now - this.fastAnchor) / 1000;
+    const allowed = unthrottled || !(rate > 0)
+      ? Number.POSITIVE_INFINITY
+      : this.fastHandsAtAnchor + rate * (elapsed + FRAME_BUDGET_MS / 1000);
+    if (this.handsPlayed >= allowed) {
+      this.noteAchieved(now);
+      return 16;
+    }
+    const budgetEnd = now + FRAME_BUDGET_MS;
+    while (performance.now() < budgetEnd && this.running && !this.locked && this.handsPlayed < allowed) {
+      const before = this.handsPlayed;
+      this.stepFast();
+      if (this.handsPlayed === before) break;
+    }
+    this.noteAchieved(performance.now());
+    return 0;
+  }
+
+  private noteAchieved(now: number): void {
+    if (this.paceSample.t === 0) {
+      this.paceSample = { t: now, hands: this.handsPlayed };
+      return;
+    }
+    const dt = now - this.paceSample.t;
+    if (dt < 500) return;
+    this.achievedHandsPerSec = (this.handsPlayed - this.paceSample.hands) / (dt / 1000);
+    this.paceSample = { t: now, hands: this.handsPlayed };
   }
 
   private consumeMachine(hand: HandMachine): void {

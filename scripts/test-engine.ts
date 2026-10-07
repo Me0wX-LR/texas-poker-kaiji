@@ -9,6 +9,13 @@ import { kaijiDecision, kaijiPostflopShove, kaijiPreflopShove } from "../src/lib
 import { drawRound, playHeadsUpMatch, playRatedMatch, tableSizes } from "../src/lib/match";
 import { Rng } from "../src/lib/rng";
 import { DEFAULT_MATCH_DEADLINE, HANDS_PER_MATCH, INITIAL_ELO } from "../src/lib/constants";
+import {
+  ABSOLUTE_SPEED_CAP,
+  measurePace,
+  multiplierFromPace,
+  speedFromPosition,
+  speedPresets,
+} from "../src/lib/pace";
 import { assignGrades, collectStyles, TIER_GRADES } from "../src/lib/tier-list";
 
 let failed = 0;
@@ -434,9 +441,46 @@ const chartCard = groupedStyles.find((entry) => entry.id === "kaiji-chart");
 check("a personality averages its seats", climberCard?.players === 2 && climberCard.elo === 1500 && climberCard.bestName === "Bea");
 check("chart copies stay their own card", chartCard?.players === 2 && chartCard.bestName === "Amy" && chartCard.bestElo === 1700);
 
+check("1× is the bottom of the log slider", speedFromPosition(0, 2500) === 1);
+check("the log slider ends on the measured maximum", speedFromPosition(1000, 2500) === 2500);
+check(
+  "the log slider stays inside the measured maximum",
+  speedFromPosition(400, 2500) > 1 && speedFromPosition(400, 2500) < 2500,
+);
+check(
+  "presets never list a speed above the bench",
+  speedPresets(800).join(",") === "1,10,100,800",
+  speedPresets(800).join(","),
+);
+check(
+  "presets cover 1, 10, 100, 1000, and the maximum",
+  speedPresets(48000).join(",") === "1,10,100,1000,48000",
+);
+check(
+  "a huge machine still stops at 100,000,000×",
+  multiplierFromPace(1e12, 5000) === ABSOLUTE_SPEED_CAP,
+);
 console.log(`match pace ${((HANDS_PER_MATCH / dt) * 1000).toFixed(0)} hands/sec`);
 if (failed) {
   console.error(`${failed} failed`);
   process.exit(1);
 }
-console.log("all passed");
+
+void measurePace({
+  seed: "pace",
+  players: 50,
+  blinds: true,
+  kaijiShare: 0,
+  benchMs: 400,
+}).then((paced) => {
+  check(
+    "a full 50-player room with blinds has a real pace",
+    paced.players === 50 && paced.blinds && paced.handsPerSec > 0 && paced.maxSpeed >= 1 && paced.maxSpeed <= ABSOLUTE_SPEED_CAP,
+    `${paced.handsPerSec.toFixed(1)} hands/s at ${paced.maxSpeed}×`,
+  );
+  if (failed) {
+    console.error(`${failed} failed`);
+    process.exit(1);
+  }
+  console.log("all passed");
+});

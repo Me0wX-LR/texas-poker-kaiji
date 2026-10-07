@@ -17,7 +17,7 @@ Open [http://127.0.0.1:47221](http://127.0.0.1:47221).
 
 ## Play
 
-- **The table** deals Kaiji's six-handed match. The rest of the room is seated at the same time, AI against AI, for the same 240 hands. When Kaiji has played 1,008 matches, every player has too. Speed runs from 1× (every action) through 1000× (batched hands, chart still updates).
+- **The table** deals Kaiji's six-handed match. The rest of the room is seated at the same time, AI against AI, for the same 240 hands. When Kaiji has played 1,008 matches, every player has too. 1× still plays every action. Faster settings batch whole hands. The slider stops at the fastest pace this browser held on a full field, including solver GTO, and the control shows that measured multiplier plus the live hands per second.
 - **Blind bet required** posts 50/100. Off, nobody posts; an all-check hand moves 0 chips. The minimum opening bet stays 100.
 - **Heads-up** rates you and the player across from you after 240 hands, with the same K=32 formula as the six-max table. Match randomly, sit Kaiji, or choose a style or personality and draw one player of that type. Next hand stays with that player. New opponent draws again. A shorter sit is not rated. While that tab is open, other players play their own heads-up matches and the ladder on the screen moves with them. A locked run does not move. Sound on starts a synthesized pulse and hits for cards, chips, an all-in, and the result. The browser only starts audio after you tap.
 - **Experiment** states the claim and plots Elo and chips from the run. The verdict is computed. A deadline locks Kaiji's final Elo.
