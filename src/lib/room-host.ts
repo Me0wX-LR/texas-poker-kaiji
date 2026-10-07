@@ -8,6 +8,12 @@ import { cleanPlayerName, streetLabel, visibleHole, type TableView } from "./tab
 
 export const SEAT_STALE_MS = 8000;
 
+/** True until the guest has heard the host and then gone quiet longer than a few heartbeats. */
+export function hostStillAlive(lastHeard: number, now: number, staleMs = SEAT_STALE_MS): boolean {
+  if (lastHeard <= 0) return true;
+  return now - lastHeard <= staleMs;
+}
+
 export interface Occupant {
   name: string;
   kind: "human" | "ai" | "open";

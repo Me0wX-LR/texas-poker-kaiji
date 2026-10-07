@@ -11,7 +11,7 @@ import { positionName, type Decision } from "@/lib/hand";
 import type { Bot } from "@/lib/policy";
 import { decryptHoles, encryptHoles, makeSeatKeys, type SeatKeys } from "@/lib/room-crypto";
 import { openRoomBus, type RoomBus, type RoomEvent } from "@/lib/room-bus";
-import { TableHost, hostView } from "@/lib/room-host";
+import { SEAT_STALE_MS, TableHost, hostStillAlive, hostView } from "@/lib/room-host";
 import { Rng, hashString } from "@/lib/rng";
 import { TableAudio } from "@/lib/table-audio";
 import { cleanPlayerName, cleanRoomCode, makeRoomCode, streetLabel, turnText, visibleHole, type HoleView, type TableView } from "@/lib/table-view";
@@ -82,6 +82,7 @@ export function RoomTable({
   const [sizing, setSizing] = useState<number[] | null>(null);
   const [copied, setCopied] = useState(false);
   const [kicked, setKicked] = useState(false);
+  const [hostGone, setHostGone] = useState(false);
   const [picking, setPicking] = useState<number | null>(null);
   const [pickQuery, setPickQuery] = useState("");
   const clientId = useRef(rememberPlayerId());
@@ -93,6 +94,9 @@ export function RoomTable({
   const blindsRef = useRef(blinds);
   const botsRef = useRef(bots);
   const seenSeq = useRef(0);
+  const hostHeard = useRef(0);
+  const hostClient = useRef<string | null>(null);
+  const hostGoneRef = useRef(false);
   const audio = useRef<TableAudio | null>(null);
   blindsRef.current = blinds;
   botsRef.current = bots;
@@ -125,7 +129,7 @@ export function RoomTable({
   }, [role]);
 
   useEffect(() => {
-    if (role !== "guest" || !code || kicked) return;
+    if (role !== "guest" || !code || kicked || hostGone) return;
     if (wire?.seats.some((seat) => seat.playerId === clientId.current && seat.connected !== false)) return;
     const timer = window.setInterval(() => {
       const publicKey = keys.current?.publicKey;
@@ -138,7 +142,7 @@ export function RoomTable({
       });
     }, 1200);
     return () => window.clearInterval(timer);
-  }, [role, code, wire, name, kicked]);
+  }, [role, code, wire, name, kicked, hostGone]);
 
   const local = host.current;
   const hand = local?.hand ?? null;
@@ -196,9 +200,16 @@ export function RoomTable({
     if (!code) return;
     const timer = window.setInterval(() => {
       if (role === "host") {
+        bus.current?.publish({
+          id: `${clientId.current.slice(0, 6)}-here-${Date.now().toString(36)}`,
+          type: "here",
+          clientId: clientId.current,
+          body: null,
+        });
         void publishRef.current();
         return;
       }
+      if (hostGoneRef.current) return;
       bus.current?.publish({
         id: `${clientId.current.slice(0, 6)}-here-${Date.now().toString(36)}`,
         type: "here",
@@ -208,6 +219,23 @@ export function RoomTable({
     }, 2000);
     return () => window.clearInterval(timer);
   }, [code, role]);
+
+  function endBecauseHostLeft() {
+    if (hostGoneRef.current) return;
+    hostGoneRef.current = true;
+    setHostGone(true);
+    setError("The host disconnected. This game is over.");
+    setWire(null);
+    setOwnCards(null);
+  }
+
+  useEffect(() => {
+    if (role !== "guest" || !code || hostGone) return;
+    const timer = window.setInterval(() => {
+      if (!hostStillAlive(hostHeard.current, Date.now(), SEAT_STALE_MS)) endBecauseHostLeft();
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [code, role, hostGone]);
 
   function nextId(): string {
     return `${clientId.current.slice(0, 6)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -273,6 +301,12 @@ export function RoomTable({
       }
       return;
     }
+    if (event.type === "state") {
+      hostClient.current = event.clientId;
+      hostHeard.current = Date.now();
+    } else if (hostClient.current && event.clientId === hostClient.current && event.type !== "close") {
+      hostHeard.current = Date.now();
+    }
     if (event.type === "kick") {
       const body = event.body as { playerId?: string; pending?: boolean };
       if (body?.playerId === clientId.current) {
@@ -290,8 +324,7 @@ export function RoomTable({
       return;
     }
     if (event.type === "close") {
-      setError("The host closed the table.");
-      setWire(null);
+      endBecauseHostLeft();
       return;
     }
     if (event.type !== "state") return;
@@ -301,6 +334,7 @@ export function RoomTable({
   }
 
   async function applyGuestState(body: WireState, order: number) {
+    if (hostGoneRef.current) return;
     if (order < seenSeq.current) return;
     seenSeq.current = order;
     const mine = keys.current;
@@ -491,7 +525,7 @@ export function RoomTable({
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
             Share the code with the people at the table. Open chairs stay open so a friend can sit. The host can kick a player, or seat a random AI or a chosen one. Empty chairs still fill at random when the host deals. The host deals the cards. Hole cards are encrypted to each seat. This table does not move the ladder.
             {role === "guest"
-              ? " If you disconnect, your chair stays. Sit back down with the same name, even in the middle of a hand. The host's chair does not."
+              ? " If you disconnect, your chair stays. Sit back down with the same name, even in the middle of a hand. If the host leaves, the game ends."
               : " A friend who disconnects keeps their chair until they sit back down with the same name."}
           </p>
         </div>
@@ -524,7 +558,11 @@ export function RoomTable({
           {error ? <p className="mt-2 text-sm text-[#ffb4b4]">{error}</p> : null}
         </div>
       )}
-      {view ? (
+      {hostGone ? (
+        <div data-testid="host-gone" className="rounded-xl border border-[#6b3030] bg-[#2a1212] p-4">
+          <p className="text-lg leading-snug text-[#ffe8e0]">The host disconnected. This game is over.</p>
+        </div>
+      ) : view ? (
         <>
           {role === "host" ? (
             <HostChairs
