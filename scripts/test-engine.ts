@@ -3,7 +3,7 @@ import { class169, decideSolver, solverFrequencies, streetTexture } from "../src
 import type { Ctx } from "../src/lib/hand";
 import { eloUpdates, expectedScore, placementScores } from "../src/lib/elo";
 import { applyKaijiPopulation, botSignature, generateField, teamName, teamPools, tierPools } from "../src/lib/field";
-import { selectPracticeBot } from "../src/lib/controller";
+import { drawPracticeSeats, selectPracticeBot } from "../src/lib/controller";
 import { HandMachine, playHand, type Decision } from "../src/lib/hand";
 import { kaijiDecision, kaijiPostflopShove, kaijiPreflopShove } from "../src/lib/kaiji";
 import { drawRound, playHeadsUpMatch, playRatedMatch, tableSizes } from "../src/lib/match";
@@ -290,6 +290,64 @@ const tied = placementScores([0, 0]);
 check("heads-up tie splits", tied[0] === 0.5 && tied[1] === 0.5);
 const shifted = eloUpdates([1500, 1500], [1, 0]);
 check("equal heads-up match is +16 and -16", Math.abs(shifted[0] - 1516) < 1e-9 && Math.abs(shifted[1] - 1484) < 1e-9);
+const fiveRandom = drawPracticeSeats(
+  practice.bots,
+  Array.from({ length: 5 }, () => ({ pool: "random" as const, botId: null })),
+  [0, 0, 0, 0, 0],
+);
+const fiveIds = fiveRandom.ok ? fiveRandom.picks.map((pick) => (pick === "kaiji" ? "kaiji" : pick.id)) : [];
+check("five random seats are distinct players", new Set(fiveIds).size === 5, fiveIds.join(","));
+const reservedName = practice.bots[0];
+const reserved = drawPracticeSeats(
+  practice.bots,
+  [
+    { pool: "random", botId: null },
+    { pool: "random", botId: reservedName.id },
+  ],
+  [0, 0],
+);
+check(
+  "a named chair is not stolen by an earlier random draw",
+  reserved.ok &&
+    reserved.picks[1] !== "kaiji" &&
+    reserved.picks[1].id === reservedName.id &&
+    reserved.picks[0] !== "kaiji" &&
+    reserved.picks[0].id !== reservedName.id,
+);
+const doubled = drawPracticeSeats(
+  practice.bots,
+  [
+    { pool: "random", botId: practice.bots[3].id },
+    { pool: "random", botId: practice.bots[3].id },
+  ],
+  [0, 0],
+);
+check("the same player cannot sit twice", !doubled.ok);
+const twoKaiji = drawPracticeSeats(
+  practice.bots,
+  [
+    { pool: "kaiji", botId: null },
+    { pool: "kaiji", botId: null },
+  ],
+  [0, 0],
+);
+check("kaiji sits at most once", !twoKaiji.ok);
+const fiveTags = drawPracticeSeats(
+  practice.bots,
+  Array.from({ length: 5 }, () => ({ pool: "style:TAG" as const, botId: null })),
+  [0, 0, 0, 0, 0],
+);
+check(
+  "five draws of one personality stay distinct",
+  fiveTags.ok &&
+    fiveTags.picks.every((pick) => pick !== "kaiji" && pick.params.personality === "TAG" && !pick.playsKaiji) &&
+    new Set(fiveTags.picks.map((pick) => (pick === "kaiji" ? "" : pick.id))).size === 5,
+);
+const sixNext = eloUpdates([1500, 1500, 1500, 1500, 1500, 1500], placementScores([100, 80, 20, -20, -80, -100]));
+check("six-max elo is zero-sum", Math.abs(sixNext.reduce((sum, elo) => sum + elo, 0) - 9000) < 1e-6);
+check("six-max first place is +16", Math.abs(sixNext[0] - 1516) < 1e-9);
+check("six-max second place is +9.6", Math.abs(sixNext[1] - 1509.6) < 1e-9);
+check("six-max last place is -16", Math.abs(sixNext[5] - 1484) < 1e-9);
 
 const duelField = generateField("duel", 7, 1000);
 const left = duelField.bots[0];

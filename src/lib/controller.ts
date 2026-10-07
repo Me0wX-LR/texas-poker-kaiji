@@ -96,16 +96,76 @@ export interface PracticeRate {
   oppName: string;
 }
 
+export interface TableRate {
+  you: number;
+  youDelta: number;
+  seats: { name: string; elo: number; delta: number }[];
+}
+
+export interface SeatRequest {
+  pool: PracticePool;
+  /** A named field player. When set, the pool is ignored. */
+  botId: string | null;
+}
+
+/**
+ * Seat several opponents without repeating a player. Kaiji himself can sit once.
+ * Named chairs are reserved before random or style draws, so a later name is not stolen.
+ * `rolls` are in [0, 1).
+ */
+export function drawPracticeSeats(
+  bots: Bot[],
+  requests: readonly SeatRequest[],
+  rolls: readonly number[],
+): { ok: true; picks: (Bot | "kaiji")[] } | { ok: false; error: string } {
+  const taken = new Set<string>();
+  let kaiji = false;
+  for (const req of requests) {
+    if (req.botId) {
+      if (taken.has(req.botId)) return { ok: false, error: "That player is already seated." };
+      if (!bots.some((bot) => bot.id === req.botId)) return { ok: false, error: "That player is not in this field." };
+      taken.add(req.botId);
+    } else if (req.pool === "kaiji") {
+      if (kaiji) return { ok: false, error: "Kaiji can only sit once." };
+      kaiji = true;
+    }
+  }
+  const picks: (Bot | "kaiji")[] = [];
+  for (let i = 0; i < requests.length; i++) {
+    const req = requests[i];
+    if (req.botId) {
+      const bot = bots.find((item) => item.id === req.botId);
+      if (!bot) return { ok: false, error: "That player is not in this field." };
+      picks.push(bot);
+      continue;
+    }
+    if (req.pool === "kaiji") {
+      picks.push("kaiji");
+      continue;
+    }
+    const pick = selectPracticeBot(bots, req.pool, rolls[i] ?? 0, taken);
+    if (!pick || pick === "kaiji") return { ok: false, error: "Nobody left in that group is free to sit." };
+    taken.add(pick.id);
+    picks.push(pick);
+  }
+  return { ok: true, picks };
+}
+
 /** Draw one field player for a practice seat. `roll` is in [0, 1). Kaiji himself is not in the field. */
-export function selectPracticeBot(bots: Bot[], pool: PracticePool, roll: number): Bot | "kaiji" | null {
+export function selectPracticeBot(
+  bots: Bot[],
+  pool: PracticePool,
+  roll: number,
+  exclude?: ReadonlySet<string>,
+): Bot | "kaiji" | null {
   if (pool === "kaiji") return "kaiji";
-  let choices = bots;
-  if (pool === "kaiji-chart") choices = bots.filter((bot) => bot.playsKaiji);
+  let choices = exclude && exclude.size > 0 ? bots.filter((bot) => !exclude.has(bot.id)) : bots;
+  if (pool === "kaiji-chart") choices = choices.filter((bot) => bot.playsKaiji);
   else if (pool.startsWith("style:")) {
     const personality = pool.slice("style:".length);
-    choices = bots.filter((bot) => !bot.playsKaiji && bot.params.personality === personality);
+    choices = choices.filter((bot) => !bot.playsKaiji && bot.params.personality === personality);
   } else if (pool !== "random") {
-    choices = bots.filter((bot) => bot.tier === pool && !bot.playsKaiji);
+    choices = choices.filter((bot) => bot.tier === pool && !bot.playsKaiji);
   }
   if (choices.length === 0) return null;
   const index = Math.min(choices.length - 1, Math.max(0, Math.floor(roll * choices.length)));
@@ -395,6 +455,21 @@ export class SimController {
     return pick ? seatFromPick(pick) : null;
   }
 
+  /** Five opponents for a human six-max table. Ratings do not move until the match is rated. */
+  seatFive(requests: readonly SeatRequest[]): { seats: PracticeSeat[] | null; error: string | null } {
+    if (requests.length !== 5) return { seats: null, error: "A full table needs five opponents." };
+    if (!this.field && requests.some((req) => req.pool !== "kaiji" || req.botId)) {
+      return { seats: null, error: "The field is still loading." };
+    }
+    const drawn = drawPracticeSeats(
+      this.field?.bots ?? [],
+      requests,
+      requests.map(() => Math.random()),
+    );
+    if (!drawn.ok) return { seats: null, error: drawn.error };
+    return { seats: drawn.picks.map((pick) => seatFromPick(pick)), error: null };
+  }
+
   practiceRatings(botId: string | null): { own: number; you: number } {
     if (!botId) return { own: this.kaijiElo, you: this.yourElo };
     const bot = this.field?.bots.find((item) => item.id === botId);
@@ -427,9 +502,69 @@ export class SimController {
     return { you: this.yourElo, opp: bot ? bot.elo : this.kaijiElo, youDelta, oppDelta, oppName };
   }
 
+  /**
+   * Rate a finished 240-hand six-max match. Seat 0 of `nets` is you; `opponents` is the other five.
+   * A locked run does not move. Kaiji's win rate and the six-max clock stay put.
+   */
+  rateYourTable(opponents: readonly { botId: string | null }[], nets: readonly number[]): TableRate | null {
+    if (this.locked || !this.field) return null;
+    if (opponents.length !== 5 || nets.length !== 6) return null;
+    const ids = opponents.map((seat) => seat.botId);
+    if (ids.filter((id) => id === null).length > 1) return null;
+    const seen = new Set<string>();
+    for (const id of ids) {
+      if (!id) continue;
+      if (seen.has(id)) return null;
+      seen.add(id);
+    }
+    const ratings = [this.yourElo];
+    const resolved: Array<{ kind: "kaiji" } | { kind: "bot"; bot: Bot }> = [];
+    for (const id of ids) {
+      if (!id) {
+        ratings.push(this.kaijiElo);
+        resolved.push({ kind: "kaiji" });
+        continue;
+      }
+      const bot = this.field.bots.find((item) => item.id === id);
+      if (!bot) return null;
+      ratings.push(bot.elo);
+      resolved.push({ kind: "bot", bot });
+    }
+    const next = eloUpdates(ratings, placementScores(nets));
+    const youDelta = next[0] - this.yourElo;
+    this.yourElo = next[0];
+    this.yourMatches += 1;
+    const seats: TableRate["seats"] = [];
+    for (let i = 0; i < resolved.length; i++) {
+      const slot = resolved[i];
+      const delta = next[i + 1] - ratings[i + 1];
+      if (slot.kind === "kaiji") {
+        this.kaijiElo = next[i + 1];
+        seats.push({ name: "Kaiji", elo: this.kaijiElo, delta });
+      } else {
+        slot.bot.elo = next[i + 1];
+        slot.bot.matches += 1;
+        seats.push({ name: slot.bot.name, elo: slot.bot.elo, delta });
+      }
+    }
+    const exclude = ids.filter((id): id is string => Boolean(id));
+    for (let i = 0; i < 4; i++) this.playFieldDuel(exclude);
+    this.dirty = false;
+    this.persist();
+    this.emit();
+    return { you: this.yourElo, youDelta, seats };
+  }
+
   /** One rated heads-up match between two field players. Skipped while the run is locked. */
   tickFieldDuel(excludeId: string | null): void {
     if (!this.playFieldDuel(excludeId)) return;
+    this.schedulePersist();
+    this.emit();
+  }
+
+  /** Same as a heads-up field tick, but several live chairs stay out of the draw. */
+  tickFieldDuels(excludeIds: readonly string[]): void {
+    if (!this.playFieldDuel(excludeIds)) return;
     this.schedulePersist();
     this.emit();
   }
@@ -571,7 +706,7 @@ export class SimController {
       { id: "kaiji", name: "Kaiji", family: "Kaiji", elo: this.kaijiElo, player: "Kaiji" },
     ];
     if (this.yourMatches > 0) {
-      samples.push({ id: "you", name: "You", family: "Heads-up", elo: this.yourElo, player: "You" });
+      samples.push({ id: "you", name: "You", family: "You", elo: this.yourElo, player: "You" });
     }
     for (const bot of this.field.bots) {
       if (bot.playsKaiji) {
@@ -592,7 +727,7 @@ export class SimController {
   private playerLadder(): { rows: LadderRow[]; kaijiRank: number; fieldSize: number } {
     const entries: Array<Omit<LadderRow, "rank">> = [
       { id: "kaiji", name: "Kaiji", style: "Kaiji", elo: this.kaijiElo, matches: this.kaijiMatches, isHero: true },
-      { id: "you", name: "You", style: "Heads-up", elo: this.yourElo, matches: this.yourMatches, isHero: false },
+      { id: "you", name: "You", style: "You", elo: this.yourElo, matches: this.yourMatches, isHero: false },
     ];
     for (const bot of this.field?.bots ?? []) {
       entries.push({
@@ -1092,10 +1227,11 @@ export class SimController {
     }, 1200);
   }
 
-  private playFieldDuel(excludeId: string | null): boolean {
+  private playFieldDuel(exclude: string | readonly string[] | null): boolean {
     if (this.locked || !this.field) return false;
     const busy = new Set<string>();
-    if (excludeId) busy.add(excludeId);
+    if (typeof exclude === "string") busy.add(exclude);
+    else if (exclude) for (const id of exclude) if (id) busy.add(id);
     if (this.live) {
       for (const seat of this.live.seats) if (seat.bot) busy.add(seat.bot.id);
     }
