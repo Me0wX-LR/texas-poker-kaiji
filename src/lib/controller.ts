@@ -449,6 +449,10 @@ export class SimController {
     return null;
   }
 
+  fieldBots(): Bot[] {
+    return this.field?.bots ?? [];
+  }
+
   practiceOpponent(pool: PracticePool): PracticeSeat | null {
     if (!this.field && pool !== "kaiji") return null;
     const pick = selectPracticeBot(this.field?.bots ?? [], pool, Math.random());

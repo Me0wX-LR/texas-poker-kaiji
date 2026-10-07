@@ -1,0 +1,537 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { PokerTable } from "@/components/poker-table";
+import { Button } from "@/components/ui/button";
+import { Slider } from "@/components/ui/slider";
+import { formatChips } from "@/lib/constants";
+import { positionName, type Decision } from "@/lib/hand";
+import type { Bot } from "@/lib/policy";
+import { decryptHoles, encryptHoles, makeSeatKeys, type SeatKeys } from "@/lib/room-crypto";
+import { openRoomBus, type RoomBus, type RoomEvent } from "@/lib/room-bus";
+import { TableHost, hostView } from "@/lib/room-host";
+import { Rng, hashString } from "@/lib/rng";
+import { TableAudio } from "@/lib/table-audio";
+import { cleanPlayerName, cleanRoomCode, makeRoomCode, streetLabel, turnText, visibleHole, type HoleView, type TableView } from "@/lib/table-view";
+
+interface WireSeat {
+  name: string;
+  kind: "human" | "ai" | "open";
+  playerId: string | null;
+  detail: string;
+}
+
+interface WireLegal {
+  canFold: boolean;
+  canCheck: boolean;
+  canCall: boolean;
+  canBet: boolean;
+  canRaise: boolean;
+  toCall: number;
+  minBetTo: number;
+  minRaiseTo: number;
+  maxTo: number;
+}
+
+interface WireState {
+  handNo: number;
+  board: number[];
+  pot: number;
+  street: number;
+  lastAction: string;
+  button: number;
+  actor: number;
+  phase: "lobby" | "act" | "done";
+  showdown: boolean;
+  winners: number[];
+  stacks: number[];
+  nets: number[];
+  folded: boolean[];
+  allin: boolean[];
+  seats: WireSeat[];
+  hostPub: string;
+  holes: (string | null)[];
+  revealed: (number[] | null)[];
+  legal: WireLegal | null;
+}
+
+export function RoomTable({
+  role,
+  initialCode = "",
+  blinds,
+  bots,
+}: {
+  role: "host" | "guest";
+  initialCode?: string;
+  blinds: boolean;
+  bots: () => Bot[];
+}) {
+  const [name, setName] = useState(role === "host" ? "You" : "");
+  const [codeInput, setCodeInput] = useState(initialCode);
+  const [code, setCode] = useState("");
+  const [relay, setRelay] = useState<RoomBus["relay"] | "idle">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+  const [wire, setWire] = useState<WireState | null>(null);
+  const [ownCards, setOwnCards] = useState<number[] | null>(null);
+  const [sizing, setSizing] = useState<number[] | null>(null);
+  const [copied, setCopied] = useState(false);
+  const clientId = useRef(`p${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`);
+  const keys = useRef<SeatKeys | null>(null);
+  const bus = useRef<RoomBus | null>(null);
+  const host = useRef<TableHost | null>(null);
+  const seq = useRef(0);
+  const publishTail = useRef(Promise.resolve());
+  const blindsRef = useRef(blinds);
+  const botsRef = useRef(bots);
+  const seenSeq = useRef(0);
+  const audio = useRef<TableAudio | null>(null);
+  blindsRef.current = blinds;
+  botsRef.current = bots;
+  if (!audio.current && typeof window !== "undefined") audio.current = new TableAudio();
+  const refresh = () => setTick((value) => value + 1);
+
+  useEffect(() => {
+    const table = audio.current ?? new TableAudio();
+    audio.current = table;
+    return () => {
+      bus.current?.publish({ id: nextId(), type: "close", clientId: clientId.current, body: null });
+      bus.current?.close();
+      host.current = null;
+      table.dispose();
+      audio.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (role !== "guest" || !code) return;
+    if (wire?.seats.some((seat) => seat.playerId === clientId.current)) return;
+    const timer = window.setInterval(() => {
+      const publicKey = keys.current?.publicKey;
+      if (!publicKey) return;
+      bus.current?.publish({
+        id: `${clientId.current.slice(0, 6)}-${Date.now().toString(36)}`,
+        type: "join",
+        clientId: clientId.current,
+        body: { name: cleanPlayerName(name), publicKey, seat: null },
+      });
+    }, 1200);
+    return () => window.clearInterval(timer);
+  }, [role, code, wire, name]);
+
+  const local = host.current;
+  const hand = local?.hand ?? null;
+
+  useEffect(() => {
+    const table = host.current;
+    if (!table?.hand || table.hand.phase !== "next-street") return;
+    const timer = window.setTimeout(() => {
+      table.advance();
+      audio.current?.street();
+      void publish();
+      refresh();
+    }, 520);
+    return () => window.clearTimeout(timer);
+  }, [tick]);
+
+  useEffect(() => {
+    const table = host.current;
+    if (!table?.hand || table.hand.phase !== "act") return;
+    const actor = table.hand.actor;
+    if (table.occupants[actor]?.kind !== "ai") return;
+    const timer = window.setTimeout(() => {
+      if (host.current?.aiStep()) {
+        const acted = host.current.hand?.lastAction ?? "";
+        if (acted.includes("fold")) audio.current?.fold();
+        else if (acted.includes("check")) audio.current?.check();
+        else if (acted.includes("shove")) audio.current?.allIn();
+        else audio.current?.chips();
+        void publish();
+        refresh();
+      }
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [tick]);
+
+  useEffect(() => {
+    if (!host.current || !bus.current) return;
+    const timer = window.setInterval(() => void publish(), 2000);
+    return () => window.clearInterval(timer);
+  }, [code]);
+
+  function nextId(): string {
+    return `${clientId.current.slice(0, 6)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  }
+
+  async function publish() {
+    const table = host.current;
+    const link = bus.current;
+    const mine = keys.current;
+    if (!table || !link || !mine) return;
+    const n = ++seq.current;
+    publishTail.current = publishTail.current.then(async () => {
+      if (n !== seq.current || !host.current) return;
+      const body = await wireFrom(host.current, mine);
+      link.publish({ id: nextId(), type: "state", clientId: clientId.current, seq: n, body }, true);
+    }).catch(() => undefined);
+    await publishTail.current;
+  }
+
+  function onEvent(event: RoomEvent) {
+    if (event.clientId === clientId.current && event.type !== "join") return;
+    if (role === "host") {
+      const table = host.current;
+      if (!table) return;
+      if (event.type === "join") {
+        const body = event.body as { name?: string; publicKey?: string; seat?: number | null };
+        if (!body?.publicKey) return;
+        const result = table.claim(event.clientId, body.name ?? "Player", body.publicKey, body.seat ?? null);
+        if ("error" in result) setNotice(result.error);
+        else setNotice(`${cleanPlayerName(body.name ?? "Player")} sat down.`);
+        void publish();
+        refresh();
+      } else if (event.type === "leave") {
+        table.leave(event.clientId);
+        void publish();
+        refresh();
+      } else if (event.type === "act") {
+        const body = event.body as Decision;
+        const problem = table.act(event.clientId, body);
+        if (problem) setNotice(problem);
+        else audio.current?.chips();
+        void publish();
+        refresh();
+      }
+      return;
+    }
+    if (event.type === "close") {
+      setError("The host closed the table.");
+      setWire(null);
+      return;
+    }
+    if (event.type !== "state") return;
+    const body = event.body as WireState;
+    if (!body || typeof body.handNo !== "number") return;
+    void applyGuestState(body, event.seq ?? 0);
+  }
+
+  async function applyGuestState(body: WireState, order: number) {
+    if (order < seenSeq.current) return;
+    seenSeq.current = order;
+    const mine = keys.current;
+    const seat = body.seats.findIndex((item) => item.playerId === clientId.current);
+    let cards: number[] | null = null;
+    if (mine && body.hostPub && seat >= 0 && body.holes[seat]) {
+      cards = await decryptHoles(mine.privateKey, body.hostPub, body.holes[seat]);
+    }
+    setOwnCards(cards);
+    setWire(body);
+    if (body.actor === seat && body.phase === "act") audio.current?.yourTurn();
+  }
+
+  async function connect(nextCode: string, nextName: string) {
+    setError(null);
+    setNotice(null);
+    const roomCode = cleanRoomCode(nextCode);
+    if (role === "guest" && roomCode.length < 5) {
+      setError("Enter the five-character table code.");
+      return;
+    }
+    const issued = role === "host" ? makeRoomCode() : roomCode;
+    keys.current = await makeSeatKeys();
+    if (role === "host") {
+      const table = new TableHost(clientId.current, nextName, blindsRef.current, new Rng(hashString(issued + clientId.current)));
+      table.setHostKey(keys.current.publicKey);
+      host.current = table;
+    }
+    bus.current?.close();
+    bus.current = openRoomBus(issued, onEvent, setRelay);
+    setCode(issued);
+    audio.current?.unlock();
+    if (role === "guest") {
+      window.setTimeout(() => {
+        bus.current?.publish({
+          id: nextId(),
+          type: "join",
+          clientId: clientId.current,
+          body: { name: cleanPlayerName(nextName), publicKey: keys.current?.publicKey, seat: null },
+        });
+      }, 300);
+    } else {
+      void publish();
+    }
+    refresh();
+  }
+
+  function sendAct(decision: Decision) {
+    if (role === "host") {
+      const problem = host.current?.act(clientId.current, decision) ?? "The table is not open.";
+      if (problem) setError(problem);
+      else {
+        setError(null);
+        setSizing(null);
+        if (decision.act === "fold") audio.current?.fold();
+        else if (decision.act === "check") audio.current?.check();
+        else if (decision.act === "allin") audio.current?.allIn();
+        else audio.current?.chips();
+        void publish();
+        refresh();
+      }
+      return;
+    }
+    bus.current?.publish({
+      id: nextId(),
+      type: "act",
+      clientId: clientId.current,
+      body: decision,
+    });
+    setSizing(null);
+  }
+
+  function deal() {
+    host.current?.setBlinds(blindsRef.current);
+    const problem = host.current?.deal(botsRef.current()) ?? "The table is not open.";
+    if (problem) setError(problem);
+    else {
+      setError(null);
+      audio.current?.deal();
+      void publish();
+      refresh();
+    }
+  }
+
+  function sit(seat: number) {
+    if (role === "host") {
+      host.current?.vacate(seat);
+      void publish();
+      refresh();
+      return;
+    }
+    bus.current?.publish({
+      id: nextId(),
+      type: "join",
+      clientId: clientId.current,
+      body: { name: cleanPlayerName(name), publicKey: keys.current?.publicKey, seat },
+    });
+  }
+
+  const guestView = wire ? guestTable(wire, clientId.current, ownCards) : null;
+  const view = local ? hostView(local) : guestView;
+  const yourTurn = Boolean(view && view.phase === "act" && view.actor === view.yourSeat && view.seats[view.yourSeat]?.isYou);
+  const legal = yourTurn ? (local && hand ? hand.legal(hand.actor) : wire?.legal) : null;
+  const link = code && typeof window !== "undefined" ? `${window.location.origin}${window.location.pathname}#table-${code}` : "";
+
+  return (
+    <div className="flex flex-col gap-3" data-testid="room-table">
+      {!code ? (
+        <div className="rounded-xl border bg-card p-3">
+          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{role === "host" ? "Host" : "Join"}</p>
+          <label className="mt-2 block text-sm" htmlFor="room-name">
+            Your name
+            <input
+              id="room-name"
+              value={name}
+              maxLength={18}
+              className="mt-1 min-h-11 w-full rounded-lg border border-input bg-[#221812] px-2.5 text-base text-[#f3e6d0] outline-none"
+              onChange={(event) => setName(event.target.value)}
+            />
+          </label>
+          {role === "guest" ? (
+            <label className="mt-2 block text-sm" htmlFor="room-code-input">
+              Table code
+              <input
+                id="room-code-input"
+                value={codeInput}
+                maxLength={5}
+                autoCapitalize="characters"
+                className="mt-1 min-h-11 w-full rounded-lg border border-input bg-[#221812] px-2.5 text-base uppercase tracking-[0.3em] text-[#f3e6d0] outline-none"
+                onChange={(event) => setCodeInput(cleanRoomCode(event.target.value))}
+              />
+            </label>
+          ) : null}
+          {error ? <p className="mt-2 text-sm text-[#ffb4b4]">{error}</p> : null}
+          <Button className="mt-3 min-h-12 w-full" onClick={() => void connect(role === "host" ? "" : codeInput, name)}>
+            {role === "host" ? "Open the table" : "Sit down"}
+          </Button>
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+            Share the code with the people at the table. Empty chairs become AIs when the host deals. The host deals the cards. Hole cards are encrypted to each seat. This table does not move the ladder.
+          </p>
+        </div>
+      ) : (
+        <div className="rounded-xl border bg-card p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+              {relay === "relay" ? "Friends can join from another phone" : relay === "local" ? "Open on this device only" : "Connecting the room"}
+            </p>
+            <p className="font-display text-sm tracking-[0.28em] text-[#e2b657]" data-room-code>
+              {code}
+            </p>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              className="min-h-11"
+              variant="outline"
+              onClick={() => {
+                void navigator.clipboard?.writeText(link).then(() => {
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1200);
+                });
+              }}
+            >
+              {copied ? "Copied" : "Copy join link"}
+            </Button>
+          </div>
+          {notice ? <p className="mt-2 text-sm">{notice}</p> : null}
+          {error ? <p className="mt-2 text-sm text-[#ffb4b4]">{error}</p> : null}
+        </div>
+      )}
+      {view ? (
+        <>
+          <PokerTable
+            view={view}
+            onSit={code && role === "guest" ? sit : undefined}
+            onVacate={code && role === "host" && (!hand || hand.phase === "done") ? sit : undefined}
+          />
+          <div className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 rounded-xl border border-black/50 bg-[#08281e]/95 p-2 backdrop-blur">
+            {role === "host" && (!hand || hand.phase === "done") ? (
+              <Button className="min-h-12 w-full text-base" onClick={deal}>
+                {hand ? "Next hand" : "Deal the hand"}
+              </Button>
+            ) : null}
+            {yourTurn && legal ? (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {legal.canFold ? (
+                  <Button className="min-h-12 text-base" variant="outline" onClick={() => sendAct({ act: "fold" })}>
+                    Fold
+                  </Button>
+                ) : null}
+                {legal.canCheck ? (
+                  <Button className="min-h-12 text-base" variant="outline" onClick={() => sendAct({ act: "check" })}>
+                    Check
+                  </Button>
+                ) : null}
+                {legal.canCall ? (
+                  <Button className="min-h-12 text-base" onClick={() => sendAct({ act: "call" })}>
+                    Call {legal.toCall.toLocaleString("en-US")}
+                  </Button>
+                ) : null}
+                {legal.canBet ? (
+                  <Button className="min-h-12 text-base" variant="secondary" onClick={() => setSizing([legal.minBetTo])}>
+                    Bet
+                  </Button>
+                ) : null}
+                {legal.canRaise ? (
+                  <Button className="min-h-12 text-base" variant="secondary" onClick={() => setSizing([legal.minRaiseTo])}>
+                    Raise
+                  </Button>
+                ) : null}
+                <Button className="col-span-2 min-h-12 text-base" onClick={() => sendAct({ act: "allin" })}>
+                  All-in {legal.maxTo.toLocaleString("en-US")}
+                </Button>
+              </div>
+            ) : null}
+            {sizing && legal ? (
+              <div className="mt-2">
+                <p className="mb-2 text-sm text-[#f6efe2]">To {sizing[0]?.toLocaleString("en-US")} chips this street</p>
+                <Slider
+                  min={legal.canBet ? legal.minBetTo : legal.minRaiseTo}
+                  max={legal.maxTo}
+                  step={50}
+                  value={sizing}
+                  onValueChange={(value) => setSizing(Array.isArray(value) ? [...value] : [value])}
+                />
+                <Button className="mt-3 min-h-12 w-full" onClick={() => sendAct(legal.canBet ? { act: "bet", to: sizing[0] } : { act: "raise", to: sizing[0] })}>
+                  Confirm
+                </Button>
+              </div>
+            ) : null}
+            {view.phase === "act" && !yourTurn ? (
+              <p className="text-center text-sm text-[#d5c7ae]">{turnText(view)}</p>
+            ) : null}
+            {role === "guest" && view.phase === "show" ? (
+              <p className="text-center text-sm text-[#d5c7ae]">Waiting for the host to deal the next hand.</p>
+            ) : null}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Session {view.seats.map((seat, index) => (seat.empty ? null : `${seat.name} ${formatChips((local?.nets ?? wire?.nets ?? [])[index] ?? 0)}`)).filter(Boolean).join(" · ")}
+          </p>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+async function wireFrom(table: TableHost, mine: SeatKeys): Promise<WireState> {
+  const hand = table.hand;
+  const rawHoles = hand ? hand.hole.map((cards) => cards.slice()) : null;
+  const foldedNow = hand ? hand.folded.slice() : [false, false, false, false, false, false];
+  const showdown = Boolean(hand?.showdown);
+  const actor = hand && hand.phase === "act" ? hand.actor : -1;
+  const legal = actor >= 0 && hand ? { ...hand.legal(actor) } : null;
+  const publicState = {
+    handNo: table.handNo,
+    board: hand?.board.slice() ?? [],
+    pot: hand?.pot ?? 0,
+    street: hand?.street ?? 0,
+    lastAction: hand?.lastAction ?? "",
+    button: table.button,
+    actor,
+    phase: (!hand ? "lobby" : hand.phase === "done" ? "done" : "act") as WireState["phase"],
+    showdown,
+    winners: hand?.winners.slice() ?? [],
+    stacks: hand ? hand.stack.slice() : table.occupants.map((seat) => (seat.kind === "open" ? 0 : 10000)),
+    nets: table.nets.slice(),
+    folded: foldedNow,
+    allin: hand ? hand.allin.slice() : [false, false, false, false, false, false],
+    seats: table.occupants.map((seat) => ({
+      name: seat.name,
+      kind: seat.kind,
+      playerId: seat.playerId,
+      detail: seat.detail,
+    })),
+  };
+  const holes: (string | null)[] = [null, null, null, null, null, null];
+  const revealed: (number[] | null)[] = [null, null, null, null, null, null];
+  if (rawHoles) {
+    for (let i = 0; i < 6; i++) {
+      const seat = publicState.seats[i];
+      const key = table.occupants[i]?.publicKey;
+      if (showdown && !foldedNow[i]) revealed[i] = rawHoles[i];
+      else if (key && seat) holes[i] = await encryptHoles(mine.privateKey, key, rawHoles[i]);
+    }
+  }
+  return { ...publicState, hostPub: mine.publicKey, holes, revealed, legal };
+}
+
+function guestTable(wire: WireState, myId: string, ownCards: number[] | null): TableView {
+  const found = wire.seats.findIndex((seat) => seat.playerId === myId);
+  const yourSeat = found >= 0 ? found : 0;
+  const phase = wire.phase === "done" ? "show" : wire.phase === "lobby" ? "lobby" : "act";
+  return {
+    phase,
+    yourSeat,
+    button: wire.button,
+    actor: wire.actor,
+    pot: wire.pot,
+    board: wire.board,
+    streetLabel: streetLabel(wire.street, phase),
+    lastAction: wire.lastAction,
+    seats: wire.seats.map((seat, index) => {
+      const hole = seat.playerId === myId ? ownCards : wire.revealed[index];
+      const cards: HoleView = seat.kind === "open" ? "back" : visibleHole(hole, seat.playerId === myId && !!ownCards, wire.showdown, wire.folded[index]);
+      return {
+        name: seat.name,
+        stack: wire.stacks[index] ?? 0,
+        folded: wire.folded[index] ?? false,
+        allin: wire.allin[index] ?? false,
+        empty: seat.kind === "open",
+        human: seat.kind === "human",
+        isYou: seat.playerId === myId,
+        cards,
+        detail: wire.phase === "lobby" ? seat.detail : `${positionName((index - wire.button + 6) % 6, 6)} · ${seat.detail}`,
+      };
+    }),
+  };
+}

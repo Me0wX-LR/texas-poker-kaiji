@@ -1,17 +1,19 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { PlayingCard } from "@/components/cards";
+import { PokerTable } from "@/components/poker-table";
+import { RoomTable } from "@/components/room-table";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { HANDS_PER_MATCH, TIER_LABEL, asset, formatChips, formatElo } from "@/lib/constants";
+import { HANDS_PER_MATCH, TIER_LABEL, formatChips, formatElo } from "@/lib/constants";
 import type { BotHit, FieldDuel, LadderRow, PracticePool, PracticeSeat, SeatRequest, TableRate } from "@/lib/controller";
 import { PRACTICE_GROUPS } from "@/lib/field";
 import { HandMachine, positionName, type Act, type Decision } from "@/lib/hand";
 import { kaijiDecision } from "@/lib/kaiji";
-import { decideBot } from "@/lib/policy";
+import { decideBot, type Bot } from "@/lib/policy";
 import { Rng, hashString } from "@/lib/rng";
 import { TableAudio, handResult } from "@/lib/table-audio";
+import { cleanRoomCode, streetLabel, visibleHole, type TableView } from "@/lib/table-view";
 
 const STREETS = ["Preflop", "Flop", "Turn", "River"];
 const ZERO = [0, 0, 0, 0, 0, 0];
@@ -40,6 +42,7 @@ export function SixMax({
   liveRatings,
   rateTable,
   tickField,
+  bots,
 }: {
   blinds: boolean;
   locked: boolean;
@@ -53,6 +56,7 @@ export function SixMax({
   liveRatings: (botId: string | null) => { own: number; you: number };
   rateTable: (opponents: { botId: string | null }[], nets: number[]) => TableRate | null;
   tickField: (excludeIds: string[]) => void;
+  bots: () => Bot[];
 }) {
   const rng = useRef(new Rng(hashString(`kaiji-six-max:${seed}`)));
   const handRef = useRef<HandMachine | null>(null);
@@ -71,6 +75,10 @@ export function SixMax({
   const seatsRef = useRef<(PracticeSeat | null)[]>([null, null, null, null, null]);
   const [seats, setSeats] = useState<(PracticeSeat | null)[]>([null, null, null, null, null]);
   const [mode, setMode] = useState<"random" | "choose">("random");
+  const [play, setPlay] = useState<"solo" | "host" | "join">("solo");
+  const [joinCode, setJoinCode] = useState("");
+  const playRef = useRef(play);
+  playRef.current = play;
   const [drafts, setDrafts] = useState<SeatDraft[]>(() => Array.from({ length: 5 }, emptyDraft));
   const [openMenu, setOpenMenu] = useState<number | null>(null);
   const [rateNote, setRateNote] = useState<string | null>(null);
@@ -118,7 +126,7 @@ export function SixMax({
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (!visibleRef.current) return;
+      if (playRef.current !== "solo" || !visibleRef.current) return;
       const ids = seatsRef.current.flatMap((seat) => (seat?.botId ? [seat.botId] : []));
       tickRef.current(ids);
     }, 900);
@@ -139,6 +147,11 @@ export function SixMax({
     setDrafts(Array.from({ length: 5 }, emptyDraft));
     setOpenMenu(null);
     rng.current = new Rng(hashString(`kaiji-six-max:${seed}`));
+    const hashed = window.location.hash.match(/^#table-([A-HJ-NP-Z2-9]{5})$/);
+    if (hashed) {
+      setPlay("join");
+      setJoinCode(cleanRoomCode(hashed[1]));
+    }
     refresh();
   }, [seed, players]);
 
@@ -325,8 +338,62 @@ export function SixMax({
     return seat ? liveRatings(seat.botId).own : 1500;
   }
 
+  const soloPhase: TableView["phase"] = !hand ? "lobby" : hand.phase === "done" ? "show" : "act";
+  const soloView: TableView = {
+    phase: soloPhase,
+    yourSeat: 0,
+    button: hand?.button ?? 0,
+    actor: hand && hand.phase === "act" ? hand.actor : -1,
+    pot: hand?.pot ?? 0,
+    board: hand?.board ?? [],
+    streetLabel: streetLabel(hand?.street ?? 0, soloPhase),
+    lastAction: hand?.lastAction ?? "",
+    seats: Array.from({ length: 6 }, (_, index) => {
+      if (index === 0) {
+        return {
+          name: "You",
+          stack: hand?.stack[0] ?? 10000,
+          folded: Boolean(hand?.folded[0]),
+          allin: Boolean(hand?.allin[0]),
+          empty: false,
+          human: true,
+          isYou: true,
+          cards: visibleHole(hand ? hand.hole[0] : null, Boolean(hand), Boolean(hand?.showdown), Boolean(hand?.folded[0])),
+          detail: hand ? positionName((6 - (hand.button % 6)) % 6, 6) : "You",
+        };
+      }
+      const seat = seats[index - 1];
+      return {
+        name: seat?.name ?? "Open",
+        stack: hand ? hand.stack[index] : 0,
+        folded: Boolean(hand?.folded[index]),
+        allin: Boolean(hand?.allin[index]),
+        empty: !seat,
+        human: false,
+        isYou: false,
+        cards: visibleHole(hand && seat ? hand.hole[index] : null, false, Boolean(hand?.showdown), Boolean(hand?.folded[index])),
+        detail: seat && hand ? `${positionName((index - hand.button + 6) % 6, 6)} · ${formatElo(eloOf(seat))}` : "Empty chair",
+      };
+    }),
+  };
+
   return (
     <section ref={rootRef} data-testid="six-max" className="flex flex-col gap-4">
+      <div className="grid grid-cols-3 gap-2">
+        <Button type="button" className="min-h-11" variant={play === "solo" ? "default" : "outline"} aria-pressed={play === "solo"} onClick={() => setPlay("solo")}>
+          Solo
+        </Button>
+        <Button type="button" className="min-h-11" variant={play === "host" ? "default" : "outline"} aria-pressed={play === "host"} onClick={() => setPlay("host")}>
+          Host
+        </Button>
+        <Button type="button" className="min-h-11" variant={play === "join" ? "default" : "outline"} aria-pressed={play === "join"} onClick={() => setPlay("join")}>
+          Join
+        </Button>
+      </div>
+      {play !== "solo" ? (
+        <RoomTable role={play === "host" ? "host" : "guest"} initialCode={joinCode} blinds={blinds} bots={bots} />
+      ) : (
+      <>
       <TableSetup
         mode={mode}
         setMode={setMode}
@@ -342,192 +409,88 @@ export function SixMax({
       />
       <LiveLadder ladder={ladder} duels={fieldDuels} locked={locked} yourElo={yourElo} seats={seats} />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
-        <div className="felt relative rounded-[2rem] p-3 sm:p-6">
-          <p className="pointer-events-none absolute inset-x-0 top-5 text-center font-display text-xs tracking-[0.4em] text-[#e2b657]/30">
-            ざわ…ざわ…
-          </p>
-          {!hand ? (
-            <div className="flex min-h-80 flex-col items-center justify-center gap-4 px-2 pt-8 text-center">
-              <div className="grid w-full max-w-lg grid-cols-2 gap-2 sm:grid-cols-3">
-                {Array.from({ length: 5 }, (_, index) => (
-                  <div key={index} className="rounded-xl border border-black/40 bg-black/25 px-2 py-3">
-                    <p className="font-display text-[10px] text-[#d5c7ae]">Chair {index + 1}</p>
-                    <p className="text-xs text-[#f6efe2]/70">Open</p>
-                  </div>
-                ))}
-              </div>
-              <div>
-                <h2 className="font-display text-sm text-[#f6efe2]">Five chairs, then yours</h2>
-                <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-[#d5c7ae]">
-                  Everyone starts each hand with 10,000 chips. A match is 240 hands, and then every rating at the table moves.
-                  {blinds ? " Blinds are 50 and 100." : " Blinds are off. An all-check hand moves nothing."}
-                </p>
-              </div>
-              {error ? <p className="max-w-sm text-sm text-[#ffb4b4]">{error}</p> : null}
+        <div className="flex flex-col gap-3">
+          <PokerTable view={soloView} />
+          <div ref={actionRef} className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 rounded-xl border border-black/50 bg-[#08281e]/95 p-2 backdrop-blur">
+            {error ? <p className="mb-2 text-sm text-[#ffb4b4]">{error}</p> : null}
+            {!hand ? (
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <Button className="min-h-12" size="lg" onClick={() => deal()}>
                   Deal the hand
                 </Button>
                 <SoundButton on={soundOn} onToggle={toggleSound} />
               </div>
-            </div>
-          ) : (
-            <div className="mx-auto flex max-w-3xl flex-col gap-3 pt-6">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {seats.map((seat, index) => {
-                  const seatNo = index + 1;
-                  const pos = positionName((seatNo - hand.button + 6) % 6, 6);
-                  const thinking = hand.phase === "act" && hand.actor === seatNo;
-                  const folded = hand.folded[seatNo];
-                  const reveal = Boolean(hand.showdown && !folded);
-                  const won = hand.phase === "done" && hand.winners.includes(seatNo);
-                  return (
-                    <div
-                      key={seat?.botId ?? seat?.name ?? index}
-                      data-seat={seatNo}
-                      className={`rounded-xl border px-2 py-2 ${thinking || won ? "border-[#e2b657]" : "border-black/40"} bg-black/30 ${folded ? "opacity-60" : ""}`}
-                    >
-                      <div className="flex items-center gap-2">
-                        {seat?.usesKaiji ? (
-                          <img src={asset("/kaiji.png")} alt="" className="pixel-art size-8 border border-black" />
-                        ) : (
-                          <span className="grid size-8 shrink-0 place-items-center border border-black bg-[#2a211b] text-[10px] text-[#f6efe2]">
-                            {(seat?.name ?? "AI").slice(0, 2)}
-                          </span>
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-display text-[10px] text-[#f6efe2]">
-                            {seat?.name ?? "Open"}
-                            {hand.button === seatNo ? " · D" : ""}
-                          </p>
-                          <p className="truncate text-[11px] text-[#d5c7ae]">
-                            {pos}
-                            {seat ? ` · ${formatElo(eloOf(seat))}` : ""}
-                            {thinking ? " · Thinking" : folded ? " · Folded" : hand.allin[seatNo] ? " · All-in" : ""}
-                          </p>
-                        </div>
-                        <p className="text-xs text-[#f6efe2]">{hand.stack[seatNo].toLocaleString("en-US")}</p>
-                      </div>
-                      <div className="mt-1 flex justify-center gap-1">
-                        {reveal
-                          ? hand.hole[seatNo].map((card) => <PlayingCard key={card} card={card} small />)
-                          : (
-                            <>
-                              <PlayingCard card={null} small />
-                              <PlayingCard card={null} small />
-                            </>
-                          )}
-                      </div>
-                    </div>
-                  );
-                })}
+            ) : null}
+            {hand && hand.phase === "done" ? (
+              <div className="grid grid-cols-2 gap-2">
+                <Button className="min-h-12 text-base" variant="outline" onClick={() => deal(true)}>
+                  New table
+                </Button>
+                <Button className="min-h-12 text-base" onClick={() => deal()}>
+                  Next hand
+                </Button>
               </div>
-
-              <div className="mx-auto flex min-h-28 w-full max-w-md flex-col items-center justify-center rounded-[3rem] border border-[#e2b657]/30 bg-black/25 px-4 py-3 text-center">
-                <p className="text-xs uppercase tracking-[0.2em] text-[#e2b657]">{hand.phase === "done" ? "Hand over" : street}</p>
-                <p className="mt-1 text-sm text-[#f6efe2]">Pot {hand.pot.toLocaleString("en-US")}</p>
-                <div className="mt-2 flex min-h-14 justify-center gap-1">
-                  {hand.board.length === 0 ? <p className="self-center text-xs text-[#d5c7ae]">Board not dealt</p> : null}
-                  {hand.board.map((card) => (
-                    <PlayingCard key={card} card={card} />
-                  ))}
-                </div>
-                {hand.lastAction ? <p className="mt-2 text-sm text-[#f6efe2]">{hand.lastAction}</p> : null}
+            ) : null}
+            {yourTurn && legal ? (
+              <div className="grid grid-cols-2 gap-2">
+                {legal.canFold ? (
+                  <Button className="min-h-12 text-base" variant="outline" onClick={() => act({ act: "fold" })}>
+                    Fold
+                  </Button>
+                ) : null}
+                {legal.canCheck ? (
+                  <Button className="min-h-12 text-base" variant="outline" onClick={() => act({ act: "check" })}>
+                    Check
+                  </Button>
+                ) : null}
+                {legal.canCall ? (
+                  <Button className="min-h-12 text-base" onClick={() => act({ act: "call" })}>
+                    Call {legal.toCall.toLocaleString("en-US")}
+                  </Button>
+                ) : null}
+                {legal.canBet ? (
+                  <Button className="min-h-12 text-base" variant="secondary" onClick={() => setSizing([legal.minBetTo])}>
+                    Bet
+                  </Button>
+                ) : null}
+                {legal.canRaise ? (
+                  <Button className="min-h-12 text-base" variant="secondary" onClick={() => setSizing([legal.minRaiseTo])}>
+                    Raise
+                  </Button>
+                ) : null}
+                <Button className="col-span-2 min-h-12 text-base" onClick={() => act({ act: "allin" })}>
+                  All-in {legal.maxTo.toLocaleString("en-US")}
+                </Button>
               </div>
-
-              <div
-                data-your-cards
-                className={`rounded-xl border px-3 py-2 ${yourTurn ? "border-[#e24b4b]" : "border-black/40"} ${hand.phase === "done" && hand.winners.includes(0) ? "border-[#e2b657]" : ""} bg-black/35`}
-              >
-                <div className="mb-2 flex items-center justify-between gap-2 text-sm text-[#f6efe2]">
-                  <span>
-                    You · {positionName((0 - hand.button + 6) % 6, 6)}
-                    {hand.button === 0 ? " · D" : ""}
-                    {yourTurn ? " · your action" : ""}
-                    {hand.folded[0] ? " · Folded" : ""}
-                  </span>
-                  <span>{hand.stack[0].toLocaleString("en-US")}</span>
-                </div>
-                <div className="flex justify-center gap-1">
-                  {hand.hole[0].map((card) => (
-                    <PlayingCard key={card} card={card} />
-                  ))}
-                </div>
+            ) : null}
+            {sizing && legal ? (
+              <div className="mt-2">
+                <p className="mb-2 text-sm text-[#f6efe2]">To {sizing[0]?.toLocaleString("en-US")} chips this street</p>
+                <Slider
+                  min={legal.canBet ? legal.minBetTo : legal.minRaiseTo}
+                  max={legal.maxTo}
+                  step={50}
+                  value={sizing}
+                  onValueChange={(value) => setSizing(Array.isArray(value) ? [...value] : [value])}
+                />
+                <Button
+                  className="mt-3 min-h-12 w-full text-base"
+                  onClick={() => act(legal.canBet ? { act: "bet", to: sizing[0] } : { act: "raise", to: sizing[0] })}
+                >
+                  Confirm
+                </Button>
               </div>
-
-              <div ref={actionRef} className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 rounded-xl border border-black/50 bg-[#08281e]/95 p-2 backdrop-blur">
-                {error ? <p className="mb-2 text-sm text-[#ffb4b4]">{error}</p> : null}
-                {hand.phase === "done" ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button className="min-h-12 text-base" variant="outline" onClick={() => deal(true)}>
-                      New table
-                    </Button>
-                    <Button className="min-h-12 text-base" onClick={() => deal()}>
-                      Next hand
-                    </Button>
-                  </div>
-                ) : null}
-                {yourTurn && legal ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    {legal.canFold ? (
-                      <Button className="min-h-12 text-base" variant="outline" onClick={() => act({ act: "fold" })}>
-                        Fold
-                      </Button>
-                    ) : null}
-                    {legal.canCheck ? (
-                      <Button className="min-h-12 text-base" variant="outline" onClick={() => act({ act: "check" })}>
-                        Check
-                      </Button>
-                    ) : null}
-                    {legal.canCall ? (
-                      <Button className="min-h-12 text-base" onClick={() => act({ act: "call" })}>
-                        Call {legal.toCall.toLocaleString("en-US")}
-                      </Button>
-                    ) : null}
-                    {legal.canBet ? (
-                      <Button className="min-h-12 text-base" variant="secondary" onClick={() => setSizing([legal.minBetTo])}>
-                        Bet
-                      </Button>
-                    ) : null}
-                    {legal.canRaise ? (
-                      <Button className="min-h-12 text-base" variant="secondary" onClick={() => setSizing([legal.minRaiseTo])}>
-                        Raise
-                      </Button>
-                    ) : null}
-                    <Button className="col-span-2 min-h-12 text-base" onClick={() => act({ act: "allin" })}>
-                      All-in {legal.maxTo.toLocaleString("en-US")}
-                    </Button>
-                  </div>
-                ) : null}
-                {sizing && legal ? (
-                  <div className="mt-2">
-                    <p className="mb-2 text-sm text-[#f6efe2]">To {sizing[0]?.toLocaleString("en-US")} chips this street</p>
-                    <Slider
-                      min={legal.canBet ? legal.minBetTo : legal.minRaiseTo}
-                      max={legal.maxTo}
-                      step={50}
-                      value={sizing}
-                      onValueChange={(value) => setSizing(Array.isArray(value) ? [...value] : [value])}
-                    />
-                    <Button
-                      className="mt-3 min-h-12 w-full text-base"
-                      onClick={() => act(legal.canBet ? { act: "bet", to: sizing[0] } : { act: "raise", to: sizing[0] })}
-                    >
-                      Confirm
-                    </Button>
-                  </div>
-                ) : null}
-                {!yourTurn && hand.phase !== "done" ? (
-                  <p className="text-center text-sm text-[#d5c7ae]">
-                    {hand.phase === "act"
-                      ? `${seats[hand.actor - 1]?.name ?? "The table"} has the action.`
-                      : "The next card is coming."}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          )}
+            ) : null}
+            {hand && !yourTurn && hand.phase !== "done" ? (
+              <p className="text-center text-sm text-[#d5c7ae]">
+                {hand.phase === "act"
+                  ? `${seats[hand.actor - 1]?.name ?? "The table"} has the action.`
+                  : "The next card is coming."}
+              </p>
+            ) : null}
+          </div>
         </div>
+
 
         <aside className="flex flex-col gap-3">
           <div className="rounded-xl border bg-card p-3">
@@ -557,6 +520,8 @@ export function SixMax({
           </div>
         </aside>
       </div>
+      </>
+      )}
     </section>
   );
 }

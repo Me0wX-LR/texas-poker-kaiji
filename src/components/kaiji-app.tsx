@@ -323,6 +323,7 @@ export function KaijiApp() {
             liveRatings={(botId) => simRef.current?.practiceRatings(botId) ?? { own: 1500, you: snap.yourElo }}
             rateTable={(opponents, nets) => simRef.current?.rateYourTable(opponents, nets) ?? null}
             tickField={(excludeIds) => simRef.current?.tickFieldDuels(excludeIds)}
+            bots={() => simRef.current?.fieldBots() ?? []}
           />
         </TabsContent>
         <TabsContent value="rules" className="mt-3">
@@ -838,7 +839,7 @@ function RulesPanel() {
       <section className="rounded-xl border bg-card p-4">
         <h2 className="text-base">Who else is in the room</h2>
         <p className="mt-2 text-muted-foreground">
-          The field is individual players, from 50 up to 1,200. There are no teams. Four styles share that field: a fast GTO-style chart, dynamic bots whose tightness and aggression move with their own Elo and the table&apos;s Elo, frozen personalities fixed at creation, and adapters that rewrite thresholds from showdown rate, fold-to-shove, and aggression they actually saw. Each match seats the whole room for 240 hands. Kaiji&apos;s table is the one on screen. Every other player sits at an AI table, so a finished schedule gives every player the same number of matches as Kaiji. The ladder ranks each player by their own Elo. Win rate is the share of rated matches in which Kaiji tied or took the best chip result. Heads-up and six-max use the same rating formula. Your match is rated after 240 hands, and the rest of the field plays its own matches while that tab is open. Six-max seats you with five players: random five, or a style, personality, or name in each chair. A short sit is not rated. A locked run does not move. Ratings stay in localStorage.
+          The field is individual players, from 50 up to 1,200. There are no teams. Four styles share that field: a fast GTO-style chart, dynamic bots whose tightness and aggression move with their own Elo and the table&apos;s Elo, frozen personalities fixed at creation, and adapters that rewrite thresholds from showdown rate, fold-to-shove, and aggression they actually saw. Each match seats the whole room for 240 hands. Kaiji&apos;s table is the one on screen. Every other player sits at an AI table, so a finished schedule gives every player the same number of matches as Kaiji. The ladder ranks each player by their own Elo. Win rate is the share of rated matches in which Kaiji tied or took the best chip result. Heads-up and six-max use the same rating formula. Your match is rated after 240 hands, and the rest of the field plays its own matches while that tab is open. Six-max seats you with five players: random five, or a style, personality, or name in each chair. A short sit is not rated. Host opens a table and Join sits a friend in an open chair; share the code or the #table link. Empty chairs become AIs when the host deals. The host deals, hole cards are encrypted to each seat, and that table does not move the ladder. A locked run does not move. Ratings stay in localStorage.
         </p>
       </section>
       <section className="rounded-xl border bg-card p-4">

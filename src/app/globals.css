@@ -221,3 +221,218 @@
 .card-back {
   background: repeating-linear-gradient(45deg, #6e1d1d 0 4px, #3d1010 4px 8px);
 }
+
+.table-scene {
+  position: relative;
+  height: 36rem;
+  overflow: hidden;
+  border-radius: 1.6rem;
+  perspective: 1100px;
+  background:
+    radial-gradient(ellipse at 50% 38%, #4a2e1e 0%, #24160f 42%, #120d0a 100%);
+  box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.45);
+}
+
+.table-floor {
+  position: absolute;
+  left: 14%;
+  right: 14%;
+  top: 28%;
+  bottom: 18%;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+  filter: blur(10px);
+  transform: rotateX(58deg);
+}
+
+.table-felt {
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  top: 20%;
+  bottom: 16%;
+  border-radius: 50%;
+  transform: rotateX(52deg);
+  background:
+    radial-gradient(ellipse at 50% 42%, #2ea978 0%, #127a52 46%, #0a4632 100%);
+  box-shadow:
+    0 18px 28px rgba(0, 0, 0, 0.35),
+    inset 0 0 30px rgba(0, 0, 0, 0.28),
+    0 0 0 12px #6a4328,
+    0 0 0 16px #1c120c;
+}
+
+.table-center {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  z-index: 3;
+  display: flex;
+  width: min(16rem, 46%);
+  transform: translate(-50%, -50%);
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.table-turn {
+  margin-bottom: 0.2rem;
+  padding: 0.28rem 0.75rem;
+  border-radius: 999px;
+  background: #1a120c;
+  font-family: "Silkscreen", ui-monospace, monospace;
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+  color: #e2b657;
+  box-shadow: 0 0 0 2px #e2b657;
+}
+
+.table-turn.mine {
+  background: #6b1d1d;
+  color: #ffe8e0;
+  box-shadow: 0 0 0 2px #e24b4b, 0 0 16px #e24b4b;
+}
+
+.table-seat {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  width: 6.6rem;
+  transform: translate(-50%, -50%);
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  text-align: center;
+}
+
+.table-seat.near {
+  width: 8rem;
+}
+
+.table-seat.folded {
+  opacity: 0.55;
+}
+
+.table-cushion {
+  width: 4.4rem;
+  height: 0.95rem;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, #8a4b2a, #2c160e 70%);
+  box-shadow: 0 7px 8px rgba(0, 0, 0, 0.35);
+}
+
+.table-avatar {
+  position: relative;
+  display: grid;
+  width: 2.7rem;
+  height: 2.7rem;
+  place-items: center;
+  border: 2px solid #1a120c;
+  border-radius: 50%;
+  background: #2a211b;
+  color: #f6efe2;
+  font-size: 0.68rem;
+  box-shadow: 0 8px 0 rgba(0, 0, 0, 0.25);
+}
+
+.table-avatar::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 78%;
+  z-index: -1;
+  width: 2.1rem;
+  height: 1.15rem;
+  transform: translateX(-50%);
+  border-radius: 0.7rem 0.7rem 0.15rem 0.15rem;
+  background: #4a3020;
+}
+
+.table-avatar.human {
+  background: #6b3a2a;
+}
+
+.table-avatar.empty {
+  background: transparent;
+  border-style: dashed;
+  color: #e2b657;
+}
+
+.table-seat.turn {
+  z-index: 6;
+}
+
+.table-seat.turn .table-avatar {
+  box-shadow:
+    0 0 0 3px #e2b657,
+    0 0 22px #e2b657;
+  animation: table-turn 1.15s ease-in-out infinite;
+}
+
+.table-seat.you.turn .table-avatar {
+  box-shadow:
+    0 0 0 3px #e24b4b,
+    0 0 18px #e24b4b;
+}
+
+.table-dealer {
+  position: absolute;
+  right: -0.35rem;
+  bottom: -0.2rem;
+  display: grid;
+  width: 1.05rem;
+  height: 1.05rem;
+  place-items: center;
+  border-radius: 50%;
+  background: #e2b657;
+  color: #1a120c;
+  font-size: 0.58rem;
+}
+
+.table-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #f6efe2;
+  font-size: 0.68rem;
+}
+
+.table-detail,
+.table-flag {
+  max-width: 100%;
+  overflow: hidden;
+  color: #d5c7ae;
+  font-size: 0.62rem;
+  white-space: nowrap;
+}
+
+.table-flag {
+  color: #e2b657;
+  font-family: "Silkscreen", ui-monospace, monospace;
+}
+
+@keyframes table-turn {
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@media (max-width: 640px) {
+  .table-scene {
+    height: 32rem;
+  }
+  .table-seat,
+  .table-seat.near {
+    width: 4.7rem;
+  }
+  .table-center {
+    width: min(11rem, 52%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table-seat.turn .table-avatar {
+    animation: none;
+  }
+}

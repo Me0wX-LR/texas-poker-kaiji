@@ -4,6 +4,9 @@ import type { Ctx } from "../src/lib/hand";
 import { eloUpdates, expectedScore, placementScores } from "../src/lib/elo";
 import { applyKaijiPopulation, botSignature, generateField, teamName, teamPools, tierPools } from "../src/lib/field";
 import { drawPracticeSeats, selectPracticeBot } from "../src/lib/controller";
+import { decryptHoles, encryptHoles, makeSeatKeys } from "../src/lib/room-crypto";
+import { TableHost } from "../src/lib/room-host";
+import { cleanRoomCode, seatSpot, visibleHole } from "../src/lib/table-view";
 import { HandMachine, playHand, type Decision } from "../src/lib/hand";
 import { kaijiDecision, kaijiPostflopShove, kaijiPreflopShove } from "../src/lib/kaiji";
 import { drawRound, playHeadsUpMatch, playRatedMatch, tableSizes } from "../src/lib/match";
@@ -518,6 +521,47 @@ check(
   "a huge machine still stops at 100,000,000×",
   multiplierFromPace(1e12, 5000) === ABSOLUTE_SPEED_CAP,
 );
+const around = [0, 1, 2, 3, 4, 5].map((seat) => seatSpot(seat, 2));
+const near = around[2];
+check(
+  "your chair sits at the bottom of the oval",
+  near?.slot === 0 && around.every((spot) => spot.y <= (near?.y ?? 0)),
+);
+check(
+  "six chairs do not stack",
+  new Set(around.map((spot) => `${spot.x.toFixed(3)},${spot.y.toFixed(3)}`)).size === 6,
+);
+const secretHole = [c("A", "s"), c("K", "h")];
+check("a player sees their own cards", JSON.stringify(visibleHole(secretHole, true, false, false)) === JSON.stringify(secretHole));
+check("another seat stays face down", visibleHole(secretHole, false, false, false) === "back");
+check("a folded opponent is mucked", visibleHole(secretHole, false, true, true) === "muck");
+check("showdown turns a live hand face up", JSON.stringify(visibleHole(secretHole, false, true, false)) === JSON.stringify(secretHole));
+check("a room code drops letters that look like digits", cleanRoomCode("ab1iol") === "ABL");
+
+const roomBots = generateField("room-table", 7, 50).bots;
+const tableHost = new TableHost("host", "You", true, new Rng(7));
+const takenSeat = tableHost.claim("ann", "Ann", "pk-ann", 2);
+const blockedSeat = tableHost.claim("bea", "Bea", "pk-bea", 2);
+const sameSeat = tableHost.claim("ann", "Ann Two", "pk-ann-2", 4);
+check("a free chair can be claimed", "seat" in takenSeat && takenSeat.seat === 2);
+check("a taken chair is refused", "error" in blockedSeat);
+check(
+  "the same player can change chairs before the deal",
+  "seat" in sameSeat && sameSeat.seat === 4 && tableHost.occupants[4]?.name === "Ann Two" && tableHost.occupants[2]?.kind === "open",
+);
+const dealProblem = tableHost.deal(roomBots);
+check("the host can deal around seated friends", dealProblem === null && tableHost.hand?.phase === "act", dealProblem ?? "");
+const lateSeat = tableHost.claim("cy", "Cy", "pk-cy", null);
+check("a new player waits for the next hand", "error" in lateSeat);
+const actorSeat = tableHost.hand?.actor ?? -1;
+const actorId = actorSeat >= 0 ? tableHost.occupants[actorSeat]?.playerId : null;
+check(
+  "only the player to act can fold",
+  tableHost.act(actorId === "ann" ? "host" : "ann", { act: "fold" }) !== null,
+);
+tableHost.vacate(1);
+check("an AI stays seated during a hand", tableHost.occupants[1]?.kind === "ai");
+
 console.log(`match pace ${((HANDS_PER_MATCH / dt) * 1000).toFixed(0)} hands/sec`);
 if (failed) {
   console.error(`${failed} failed`);
@@ -530,7 +574,15 @@ void measurePace({
   blinds: true,
   kaijiShare: 0,
   benchMs: 400,
-}).then((paced) => {
+}).then(async (paced) => {
+  const alice = await makeSeatKeys();
+  const bob = await makeSeatKeys();
+  const eve = await makeSeatKeys();
+  const sealed = await encryptHoles(alice.privateKey, bob.publicKey, [3, 17]);
+  const opened = await decryptHoles(bob.privateKey, alice.publicKey, sealed);
+  const stolen = await decryptHoles(eve.privateKey, alice.publicKey, sealed);
+  check("hole cards round-trip for the seated player", JSON.stringify(opened) === JSON.stringify([3, 17]));
+  check("the wrong key cannot read the holes", stolen === null);
   check(
     "a full 50-player room with blinds has a real pace",
     paced.players === 50 && paced.blinds && paced.handsPerSec > 0 && paced.maxSpeed >= 1 && paced.maxSpeed <= ABSOLUTE_SPEED_CAP,
