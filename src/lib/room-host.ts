@@ -56,6 +56,19 @@ function openSeat(): Occupant {
   };
 }
 
+/** Named players the host can tap. An empty search shows the first free names. */
+export function seatChoices(bots: Bot[], taken: ReadonlySet<string>, query: string, limit = 40): Bot[] {
+  const q = query.trim().toLowerCase();
+  const free = bots.filter((bot) => !taken.has(bot.id));
+  const matched = q
+    ? free.filter((bot) => {
+        const style = bot.playsKaiji ? "kaiji chart" : bot.params.personality;
+        return bot.name.toLowerCase().includes(q) || style.toLowerCase().includes(q);
+      })
+    : free;
+  return matched.slice(0, limit);
+}
+
 export class TableHost {
   readonly occupants: Occupant[];
   hand: HandMachine | null = null;

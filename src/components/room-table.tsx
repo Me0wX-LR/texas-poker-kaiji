@@ -4,14 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import { PokerTable } from "@/components/poker-table";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { TIER_LABEL, formatChips } from "@/lib/constants";
+import { MIN_TEAMS, TIER_LABEL, formatChips } from "@/lib/constants";
 import type { PracticePool, SeatRequest } from "@/lib/controller";
-import { PRACTICE_GROUPS } from "@/lib/field";
+import { PRACTICE_GROUPS, generateField } from "@/lib/field";
 import { positionName, type Decision } from "@/lib/hand";
 import type { Bot } from "@/lib/policy";
 import { decryptHoles, encryptHoles, makeSeatKeys, type SeatKeys } from "@/lib/room-crypto";
 import { openRoomBus, type RoomBus, type RoomEvent } from "@/lib/room-bus";
-import { SEAT_STALE_MS, TableHost, hostStillAlive, hostView } from "@/lib/room-host";
+import { SEAT_STALE_MS, TableHost, hostStillAlive, hostView, seatChoices } from "@/lib/room-host";
 import { Rng, hashString } from "@/lib/rng";
 import { TableAudio } from "@/lib/table-audio";
 import { cleanPlayerName, cleanRoomCode, makeRoomCode, streetLabel, turnText, visibleHole, type HoleView, type TableView } from "@/lib/table-view";
@@ -93,6 +93,7 @@ export function RoomTable({
   const publishTail = useRef(Promise.resolve());
   const blindsRef = useRef(blinds);
   const botsRef = useRef(bots);
+  const fallbackBots = useRef<Bot[] | null>(null);
   const seenSeq = useRef(0);
   const hostHeard = useRef(0);
   const hostClient = useRef<string | null>(null);
@@ -100,6 +101,12 @@ export function RoomTable({
   const audio = useRef<TableAudio | null>(null);
   blindsRef.current = blinds;
   botsRef.current = bots;
+  function roster(): Bot[] {
+    const field = botsRef.current();
+    if (field.length >= 5) return field;
+    if (!fallbackBots.current) fallbackBots.current = generateField("open-table", MIN_TEAMS, 60).bots;
+    return fallbackBots.current;
+  }
   if (!audio.current && typeof window !== "undefined") audio.current = new TableAudio();
   const refresh = () => setTick((value) => value + 1);
 
@@ -425,7 +432,7 @@ export function RoomTable({
       return;
     }
     table.setBlinds(blindsRef.current);
-    const problem = table.deal(botsRef.current());
+    const problem = table.deal(roster());
     if (problem) setError(problem);
     else {
       setError(null);
@@ -473,7 +480,7 @@ export function RoomTable({
   function fillSeat(seat: number, request: SeatRequest) {
     const table = host.current;
     if (!table) return;
-    const problem = table.seatAi(seat, botsRef.current(), request);
+    const problem = table.seatAi(seat, roster(), request);
     if (problem) setNotice(problem);
     else {
       setNotice(`${table.occupants[seat]?.name ?? "An AI"} sat down.`);
@@ -523,7 +530,7 @@ export function RoomTable({
             {role === "host" ? "Open the table" : savedName && cleanPlayerName(name || savedName) === savedName ? "Sit back down" : "Sit down"}
           </Button>
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-            Share the code with the people at the table. Open chairs stay open so a friend can sit. The host can kick a player, or seat a random AI or a chosen one. Empty chairs still fill at random when the host deals. The host deals the cards. Hole cards are encrypted to each seat. This table does not move the ladder.
+            Share the code with the people at the table. Open chairs stay open so a friend can sit. The host can kick a player, seat a random AI, or tap a named player. Empty chairs still fill at random when the host deals. The host deals the cards. Hole cards are encrypted to each seat. This table does not move the ladder.
             {role === "guest"
               ? " If you disconnect, your chair stays. Sit back down with the same name, even in the middle of a hand. If the host leaves, the game ends."
               : " A friend who disconnects keeps their chair until they sit back down with the same name."}
@@ -570,7 +577,7 @@ export function RoomTable({
               between={!hand || hand.phase === "done"}
               picking={picking}
               query={pickQuery}
-              bots={bots()}
+              bots={roster()}
               taken={new Set(local?.occupants.flatMap((seat) => (seat.botId ? [seat.botId] : [])) ?? [])}
               onPickSeat={(seat) => {
                 setPicking(seat);
@@ -736,15 +743,12 @@ function HostChairs({
   onKick: (seat: number) => void;
   onRemove: (seat: number) => void;
 }) {
-  const q = query.trim().toLowerCase();
-  const hits = q
-    ? bots.filter((bot) => !taken.has(bot.id) && bot.name.toLowerCase().includes(q)).slice(0, 6)
-    : [];
+  const hits = seatChoices(bots, taken, query);
   return (
     <div className="rounded-xl border bg-card p-3" data-testid="host-seats">
       <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Chairs</p>
       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-        An open chair can take a friend with the code, a random AI, or one you pick. Kick removes a player. Kaiji can sit once.
+        An open chair can take a friend with the code, a random AI, or a named player you tap. Kick removes a player. Kaiji can sit once.
       </p>
       <ul className="mt-2 flex flex-col gap-2">
         {seats.map((seat, index) => {
@@ -764,7 +768,7 @@ function HostChairs({
                         Random AI
                       </Button>
                       <Button type="button" className="min-h-11" variant={picking === index ? "default" : "outline"} onClick={() => onPickSeat(picking === index ? -1 : index)}>
-                        {picking === index ? "Close" : "Choose"}
+                        {picking === index ? "Close" : "Choose AI"}
                       </Button>
                     </>
                   ) : null}
@@ -811,8 +815,35 @@ function AiMenu({
   onName: (botId: string) => void;
 }) {
   return (
-    <div className="mt-2">
-      <div role="listbox" className="max-h-52 overflow-auto rounded-lg border border-[#4a382c] bg-[#221812] p-1">
+    <div className="mt-2" data-testid="ai-picker">
+      <input
+        value={query}
+        placeholder="Type a name or a style"
+        aria-label="AI name"
+        className="min-h-11 w-full rounded-lg border border-input bg-[#221812] px-2.5 text-base text-[#f3e6d0] outline-none placeholder:text-[#c4b39a]"
+        onChange={(event) => onQuery(event.target.value)}
+      />
+      {hits.length > 0 ? (
+        <div role="listbox" aria-label="Named players" className="mt-1 max-h-52 overflow-auto rounded-lg border border-[#4a382c] bg-[#221812]">
+          {hits.map((hit) => (
+            <button
+              key={hit.id}
+              type="button"
+              role="option"
+              aria-selected={false}
+              data-seat-ai={hit.name}
+              className="flex min-h-11 w-full items-center justify-between gap-2 px-2 text-left text-sm text-[#f3e6d0]"
+              onClick={() => onName(hit.id)}
+            >
+              <span className="truncate">{hit.name}</span>
+              <span className="shrink-0 text-[#c4b39a]">{hit.playsKaiji ? "Kaiji chart" : hit.params.personality}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-1 text-xs text-[#c4b39a]">No player matches.</p>
+      )}
+      <div role="listbox" aria-label="Styles" className="mt-2 max-h-40 overflow-auto rounded-lg border border-[#4a382c] bg-[#221812] p-1">
         <PoolChoice label="Random player" onPick={() => onPool("random")} />
         <PoolChoice label="Kaiji" onPick={() => onPool("kaiji")} />
         <PoolChoice label="Kaiji chart copies" onPick={() => onPool("kaiji-chart")} />
@@ -826,37 +857,13 @@ function AiMenu({
           </div>
         ))}
       </div>
-      <input
-        value={query}
-        placeholder="Or type a name"
-        aria-label="AI name"
-        className="mt-2 min-h-11 w-full rounded-lg border border-input bg-[#221812] px-2.5 text-base text-[#f3e6d0] outline-none placeholder:text-[#c4b39a]"
-        onChange={(event) => onQuery(event.target.value)}
-      />
-      {hits.length > 0 ? (
-        <div className="mt-1 max-h-40 overflow-auto rounded-lg border border-[#4a382c] bg-[#221812]">
-          {hits.map((hit) => (
-            <button
-              key={hit.id}
-              type="button"
-              className="flex min-h-11 w-full items-center justify-between gap-2 px-2 text-left text-sm text-[#f3e6d0]"
-              onClick={() => onName(hit.id)}
-            >
-              <span className="truncate">{hit.name}</span>
-              <span className="shrink-0 text-[#c4b39a]">{hit.params.personality}</span>
-            </button>
-          ))}
-        </div>
-      ) : query.trim() ? (
-        <p className="mt-1 text-xs text-[#c4b39a]">No player matches.</p>
-      ) : null}
     </div>
   );
 }
 
 function PoolChoice({ label, onPick }: { label: string; onPick: () => void }) {
   return (
-    <button type="button" role="option" className="flex min-h-11 w-full items-center rounded-md px-2 text-left text-base text-[#f3e6d0]" onClick={onPick}>
+    <button type="button" role="option" aria-selected={false} className="flex min-h-11 w-full items-center rounded-md px-2 text-left text-base text-[#f3e6d0]" onClick={onPick}>
       {label}
     </button>
   );
