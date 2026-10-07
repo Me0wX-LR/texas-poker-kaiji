@@ -30,6 +30,7 @@ import {
 } from "@/lib/constants";
 import { SimController, type LadderRow, type SimSnap } from "@/lib/controller";
 import { kaijiPopulationCount } from "@/lib/field";
+import { TIER_GRADES, type TierGrade, type TierListCard } from "@/lib/tier-list";
 import type { HistoryPoint } from "@/lib/storage";
 
 const TIER_COLORS: Record<(typeof TIERS)[number], string> = {
@@ -117,8 +118,8 @@ export function KaijiApp() {
       setDeadlineError("Match deadline needs a whole number of at least 1.");
       return;
     }
-    const message = simRef.current?.setMatchDeadline(matches) ?? "The table is not ready.";
-    setDeadlineError(message);
+    if (!simRef.current) return;
+    setDeadlineError(simRef.current.setMatchDeadline(matches));
   }
 
   const typedMatches = Number(matchDraft);
@@ -127,7 +128,8 @@ export function KaijiApp() {
   const matchStopCopy = `${shownMatches.toLocaleString("en-US")} ${matchWord} = ${(shownMatches * HANDS_PER_MATCH).toLocaleString("en-US")} hands`;
 
   function submitSetup() {
-    const message = simRef.current?.newRun(seed, Number(bots), Number(kaijiShare)) ?? "The table is not ready.";
+    if (!simRef.current) return;
+    const message = simRef.current.newRun(seed, Number(bots), Number(kaijiShare));
     if (message) setSetupError(message);
     else {
       setSetupError(null);
@@ -257,6 +259,7 @@ export function KaijiApp() {
         <TabsList className="flex h-auto w-full flex-wrap">
           <TabsTrigger className="min-h-11 px-3" value="table">The table</TabsTrigger>
           <TabsTrigger className="min-h-11 px-3" value="ladder">Ladder</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3" value="tiers">Tier list</TabsTrigger>
           <TabsTrigger className="min-h-11 px-3" value="experiment">Experiment</TabsTrigger>
           <TabsTrigger className="min-h-11 px-3" value="heads">Heads-up</TabsTrigger>
           <TabsTrigger className="min-h-11 px-3" value="rules">Rules</TabsTrigger>
@@ -267,6 +270,9 @@ export function KaijiApp() {
         </TabsContent>
         <TabsContent value="ladder" className="mt-3">
           <LadderPanel snap={snap} cut={ladderCut} setCut={setLadderCut} />
+        </TabsContent>
+        <TabsContent value="tiers" className="mt-3">
+          <TierListPanel snap={snap} />
         </TabsContent>
         <TabsContent value="experiment" className="mt-3 space-y-4">
           <ExperimentPanel snap={snap} tierLines={tierLines} chipLines={chipLines} query={query} setQuery={setQuery} hits={hits} />
@@ -537,6 +543,86 @@ function SortHeader({
   );
 }
 
+const GRADE_INK: Record<TierGrade, string> = {
+  "S+": "#e2b657",
+  S: "#f6e7b4",
+  A: "#7dcea0",
+  B: "#5dade2",
+  C: "#c39bd3",
+  D: "#e0a36a",
+  F: "#e07a7a",
+};
+
+function TierListPanel({ snap }: { snap: SimSnap }) {
+  const cards = snap.tierList;
+  if (!cards) {
+    return (
+      <section className="rounded-xl border border-dashed p-4">
+        <p className="font-display text-[10px] text-[#e2b657]">After the lock</p>
+        <h2 className="mt-1 text-lg">Tier list</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+          This list is written when the run locks. Finish the match deadline, or the hand deadline, and each style is placed from S+ down to F by its final average Elo. The ladder keeps every player. This tab keeps one card per style.
+        </p>
+      </section>
+    );
+  }
+  const byGrade = new Map<TierGrade, TierListCard[]>();
+  for (const grade of TIER_GRADES) byGrade.set(grade, []);
+  for (const card of cards) byGrade.get(card.grade)?.push(card);
+  const shared = new Set(cards.map((card) => card.grade)).size === 1;
+  return (
+    <section className="rounded-xl border bg-card p-4">
+      <p className="font-display text-[10px] text-[#e2b657]">Locked run</p>
+      <h2 className="mt-1 text-lg">Tier list</h2>
+      <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+        {snap.lockCopy} Grades are this run&apos;s order, from the highest style average at S+ to the lowest at F. Elo that rounds to the same number shares a grade. Kaiji is his own card. Chart copies are one card. Each personality still playing its own strategy is one card.
+        {snap.yourMatches > 0 ? " You are on the list because a heads-up sit was rated." : " You stay off the list until a heads-up sit is rated."}
+      </p>
+      {shared ? (
+        <p className="mt-2 text-sm text-muted-foreground">
+          Every style rounded to the same Elo, so the whole room sits in {cards[0]?.grade ?? "B"}.
+        </p>
+      ) : null}
+      <ol className="mt-4 space-y-2">
+        {TIER_GRADES.map((grade) => {
+          const row = byGrade.get(grade) ?? [];
+          return (
+            <li key={grade} className="grid grid-cols-1 gap-2 rounded-xl border p-2 sm:grid-cols-[4.75rem_1fr] sm:items-stretch">
+              <div
+                className="flex min-h-11 items-center justify-center rounded-lg"
+                style={{ backgroundColor: `${GRADE_INK[grade]}22` }}
+              >
+                <span className="font-display text-2xl leading-none" style={{ color: GRADE_INK[grade] }}>
+                  {grade}
+                </span>
+              </div>
+              {row.length === 0 ? (
+                <p className="self-center px-2 text-sm text-muted-foreground">No style landed here.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {row.map((card) => (
+                    <article key={card.id} className="min-w-[10.5rem] flex-1 rounded-lg border bg-black/30 px-3 py-2 sm:max-w-[16rem]">
+                      <p className="font-medium">{card.name}</p>
+                      {card.family !== card.name ? <p className="text-xs text-muted-foreground">{card.family}</p> : null}
+                      <p className="mt-1 tabular-nums">{formatElo(card.elo)}</p>
+                      <p className="text-xs text-muted-foreground">{card.players === 1 ? "1 player" : `${card.players.toLocaleString("en-US")} players`}</p>
+                      {card.players > 1 ? (
+                        <p className="text-xs text-muted-foreground">
+                          Best {card.bestName} · {formatElo(card.bestElo)}
+                        </p>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
 function ExperimentPanel({
   snap,
   tierLines,
@@ -712,7 +798,7 @@ function RulesPanel() {
       <section className="rounded-xl border bg-card p-4">
         <h2 className="text-base">The deadline</h2>
         <p className="mt-2 text-muted-foreground">
-          Poker on the slides is a forced match every 10 minutes. The default stop is the full window from 5 Oct 2026 00:00 UTC through the 23:50 UTC match on 11 Oct 2026: 1,008 matches. Each match is 240 hands, so that window is 241,920 hands. The hand total is the match count times 240 and rewrites itself when the match count changes. Whichever limit arrives first locks Kaiji&apos;s Elo. A match cut off before 240 hands is not rated. Kaiji&apos;s Elo on the lock is the last rated value.
+          Poker on the slides is a forced match every 10 minutes. The default stop is the full window from 5 Oct 2026 00:00 UTC through the 23:50 UTC match on 11 Oct 2026: 1,008 matches. Each match is 240 hands, so that window is 241,920 hands. The hand total is the match count times 240 and rewrites itself when the match count changes. Whichever limit arrives first locks Kaiji&apos;s Elo. A match cut off before 240 hands is not rated. Kaiji&apos;s Elo on the lock is the last rated value. The Tier list tab stays empty until that lock, then places each style from S+ down to F by its average Elo.
         </p>
       </section>
     </article>

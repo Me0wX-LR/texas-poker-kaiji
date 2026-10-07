@@ -21,6 +21,7 @@ import { SeatCard, drawRound, playHeadsUpMatch, playTableHand, rateTable } from 
 import { decideBot, learnFromHand, type Bot } from "./policy";
 import { Rng, hashString } from "./rng";
 import { HistoryPoint, SaveData, clearSave, loadSave, writeSave } from "./storage";
+import { assignGrades, collectStyles, type StyleSample, type TierListCard } from "./tier-list";
 
 export interface SeatLabel {
   name: string;
@@ -203,6 +204,8 @@ export interface SimSnap {
   lockCopy: string | null;
   restored: boolean;
   tierCounts: Record<Tier, number>;
+  /** Style grades for a locked run. Null until the deadline locks the ladder. */
+  tierList: TierListCard[] | null;
 }
 
 const EMPTY_TIERS: Record<Tier, number> = { gto: 0, dynamic: 0, frozen: 0, agentic: 0 };
@@ -459,7 +462,33 @@ export class SimController {
       lockCopy: this.locked ? this.lockText() : null,
       restored: this.restored,
       tierCounts: this.tierCounts,
+      tierList: this.styleTierList(),
     };
+  }
+
+  /** One card per style, graded only after the run locks. */
+  private styleTierList(): TierListCard[] | null {
+    if (!this.locked || !this.field) return null;
+    const samples: StyleSample[] = [
+      { id: "kaiji", name: "Kaiji", family: "Kaiji", elo: this.kaijiElo, player: "Kaiji" },
+    ];
+    if (this.yourMatches > 0) {
+      samples.push({ id: "you", name: "You", family: "Heads-up", elo: this.yourElo, player: "You" });
+    }
+    for (const bot of this.field.bots) {
+      if (bot.playsKaiji) {
+        samples.push({ id: "kaiji-chart", name: "Kaiji chart", family: "Kaiji chart", elo: bot.elo, player: bot.name });
+      } else {
+        samples.push({
+          id: `style:${bot.params.personality}`,
+          name: bot.params.personality,
+          family: TIER_LABEL[bot.tier],
+          elo: bot.elo,
+          player: bot.name,
+        });
+      }
+    }
+    return assignGrades(collectStyles(samples));
   }
 
   private playerLadder(): { rows: LadderRow[]; kaijiRank: number; fieldSize: number } {

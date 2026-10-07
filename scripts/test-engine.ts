@@ -9,6 +9,7 @@ import { kaijiDecision, kaijiPostflopShove, kaijiPreflopShove } from "../src/lib
 import { drawRound, playHeadsUpMatch, playRatedMatch, tableSizes } from "../src/lib/match";
 import { Rng } from "../src/lib/rng";
 import { DEFAULT_MATCH_DEADLINE, HANDS_PER_MATCH, INITIAL_ELO } from "../src/lib/constants";
+import { assignGrades, collectStyles, TIER_GRADES } from "../src/lib/tier-list";
 
 let failed = 0;
 function check(name: string, cond: boolean, detail = ""): void {
@@ -382,6 +383,56 @@ check(
   "gto bots are labeled solver GTO",
   field.bots.some((bot) => bot.tier === "gto" && bot.params.personality === "Solver GTO"),
 );
+
+const spread = assignGrades(
+  [1700, 1600, 1550, 1500, 1450, 1400, 1300].map((elo, index) => ({
+    id: `s${index}`,
+    name: `Style ${index}`,
+    family: "Frozen",
+    elo,
+    players: 1,
+    bestName: `Style ${index}`,
+    bestElo: elo,
+  })),
+);
+check(
+  "seven distinct elos fill S+ through F",
+  spread.map((card) => card.grade).join(",") === TIER_GRADES.join(","),
+  spread.map((card) => card.grade).join(","),
+);
+const flat = assignGrades([
+  { id: "a", name: "A", family: "A", elo: 1500, players: 1, bestName: "A", bestElo: 1500 },
+  { id: "b", name: "B", family: "B", elo: 1500.2, players: 1, bestName: "B", bestElo: 1500.2 },
+]);
+check("a tied room sits in B", flat.every((card) => card.grade === "B"));
+const poles = assignGrades([
+  { id: "top", name: "Top", family: "Top", elo: 1600, players: 1, bestName: "Top", bestElo: 1600 },
+  { id: "bot", name: "Bot", family: "Bot", elo: 1400, players: 1, bestName: "Bot", bestElo: 1400 },
+]);
+check(
+  "two styles take S+ and F",
+  poles[0]?.grade === "S+" && poles[1]?.grade === "F",
+  poles.map((card) => card.grade).join(","),
+);
+const sharedGrade = assignGrades([
+  { id: "a", name: "Alpha", family: "Frozen", elo: 1600.2, players: 2, bestName: "Alpha", bestElo: 1610 },
+  { id: "b", name: "Beta", family: "Frozen", elo: 1600.4, players: 2, bestName: "Beta", bestElo: 1620 },
+  { id: "c", name: "Gamma", family: "Frozen", elo: 1400, players: 1, bestName: "Gamma", bestElo: 1400 },
+]);
+check(
+  "rounded elo ties share a grade",
+  sharedGrade[0]?.grade === "S+" && sharedGrade[1]?.grade === "S+" && sharedGrade[2]?.grade === "F",
+);
+const groupedStyles = collectStyles([
+  { id: "style:Climber", name: "Climber", family: "Dynamic-by-Elo", elo: 1510, player: "Bea" },
+  { id: "style:Climber", name: "Climber", family: "Dynamic-by-Elo", elo: 1490, player: "Ann" },
+  { id: "kaiji-chart", name: "Kaiji chart", family: "Kaiji chart", elo: 1700, player: "Zed" },
+  { id: "kaiji-chart", name: "Kaiji chart", family: "Kaiji chart", elo: 1700, player: "Amy" },
+]);
+const climberCard = groupedStyles.find((entry) => entry.id === "style:Climber");
+const chartCard = groupedStyles.find((entry) => entry.id === "kaiji-chart");
+check("a personality averages its seats", climberCard?.players === 2 && climberCard.elo === 1500 && climberCard.bestName === "Bea");
+check("chart copies stay their own card", chartCard?.players === 2 && chartCard.bestName === "Amy" && chartCard.bestElo === 1700);
 
 console.log(`match pace ${((HANDS_PER_MATCH / dt) * 1000).toFixed(0)} hands/sec`);
 if (failed) {
