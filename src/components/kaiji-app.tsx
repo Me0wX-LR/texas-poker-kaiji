@@ -316,7 +316,7 @@ export function KaijiApp() {
               />
             </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Set this here, when the run starts. {populationCopy(bots, kaijiShare)} The real Kaiji is one more player and always uses the chart. There are no teams. At least 1,000 players, default 1,200. The same seed repeats the deals.
+              Set this here, when the run starts. {populationCopy(bots, kaijiShare)} The real Kaiji is one more player and always uses the chart. There are no teams. 50 to 1,200 players, default 1,200. The same seed repeats the deals.
             </p>
             {setupError ? <p className="text-sm text-[#ffb4b4]">{setupError}</p> : null}
           </div>
@@ -574,7 +574,7 @@ function ExperimentPanel({
           <section className="rounded-xl border bg-card p-4">
             <h3 className="text-base">Kaiji against the four tiers</h3>
             <p className="mb-2 text-xs text-muted-foreground">
-              Each line is the average Elo of players of that style who have sat. GTO-style and Dynamic-by-Elo looked much faster before because the chart added every one of their Elo changes into a single number and drew it on Kaiji&apos;s scale. There are 300 of each. Kaiji is one player, so only his own change hits his line. Right now those averages are GTO {formatElo(snap.tiers.gto)}, dynamic {formatElo(snap.tiers.dynamic)}, frozen {formatElo(snap.tiers.frozen)}, adapters {formatElo(snap.tiers.agentic)}. The group piles, which are not ratings, are GTO {formatElo(snap.tierPiles.gto)}, dynamic {formatElo(snap.tierPiles.dynamic)}, frozen {formatElo(snap.tierPiles.frozen)}, adapters {formatElo(snap.tierPiles.agentic)}.
+              Each line is the average Elo of players of that style who have sat. GTO-style and Dynamic-by-Elo looked much faster before because the chart added every one of their Elo changes into a single number and drew it on Kaiji&apos;s scale. This field has {snap.tierCounts.gto.toLocaleString("en-US")} GTO-style, {snap.tierCounts.dynamic.toLocaleString("en-US")} dynamic, {snap.tierCounts.frozen.toLocaleString("en-US")} frozen, and {snap.tierCounts.agentic.toLocaleString("en-US")} adapters. Kaiji is one player, so only his own change hits his line. Right now those averages are GTO {formatElo(snap.tiers.gto)}, dynamic {formatElo(snap.tiers.dynamic)}, frozen {formatElo(snap.tiers.frozen)}, adapters {formatElo(snap.tiers.agentic)}. The group piles, which are not ratings, are GTO {formatElo(snap.tierPiles.gto)}, dynamic {formatElo(snap.tierPiles.dynamic)}, frozen {formatElo(snap.tierPiles.frozen)}, adapters {formatElo(snap.tierPiles.agentic)}.
             </p>
             <LineChart points={snap.history} lines={tierLines} empty="" />
           </section>
@@ -706,7 +706,7 @@ function RulesPanel() {
       <section className="rounded-xl border bg-card p-4">
         <h2 className="text-base">Who else is in the room</h2>
         <p className="mt-2 text-muted-foreground">
-          The field is individual players, at least a thousand of them. There are no teams. Four styles share that field: a fast GTO-style chart, dynamic bots whose tightness and aggression move with their own Elo and the table&apos;s Elo, frozen personalities fixed at creation, and adapters that rewrite thresholds from showdown rate, fold-to-shove, and aggression they actually saw. Each match draws Kaiji plus five of those players for all 240 hands. The ladder ranks each player by their own Elo. Win rate is the share of rated matches in which Kaiji tied or took the best chip result. Heads-up uses the same rating formula. Your match is rated after 240 hands, and the rest of the field plays its own heads-up matches while that tab is open. A locked run does not move. Ratings stay in localStorage.
+          The field is individual players, from 50 up to 1,200. There are no teams. Four styles share that field: a fast GTO-style chart, dynamic bots whose tightness and aggression move with their own Elo and the table&apos;s Elo, frozen personalities fixed at creation, and adapters that rewrite thresholds from showdown rate, fold-to-shove, and aggression they actually saw. Each match draws Kaiji plus five of those players for all 240 hands. The ladder ranks each player by their own Elo. Win rate is the share of rated matches in which Kaiji tied or took the best chip result. Heads-up uses the same rating formula. Your match is rated after 240 hands, and the rest of the field plays its own heads-up matches while that tab is open. A locked run does not move. Ratings stay in localStorage.
         </p>
       </section>
       <section className="rounded-xl border bg-card p-4">

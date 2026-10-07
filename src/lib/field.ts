@@ -1,4 +1,4 @@
-import { INITIAL_ELO, MAX_TEAMS, MIN_BOTS, MIN_TEAMS, TIERS, type Tier } from "./constants";
+import { INITIAL_ELO, MAX_BOTS, MAX_TEAMS, MIN_BOTS, MIN_TEAMS, TIERS, type Tier } from "./constants";
 import { Bot, BotParams, emptyMemory } from "./policy";
 import { Rng, hashString } from "./rng";
 
@@ -206,8 +206,8 @@ export function validateField(teamCount: number, botCount: number): string | nul
   if (!Number.isInteger(teamCount) || teamCount < MIN_TEAMS || teamCount > MAX_TEAMS) {
     return `Use ${MIN_TEAMS} to ${MAX_TEAMS} teams so six seats can be filled.`;
   }
-  if (!Number.isInteger(botCount) || botCount < MIN_BOTS) {
-    return `The field needs at least ${MIN_BOTS.toLocaleString("en-US")} bots.`;
+  if (!Number.isInteger(botCount) || botCount < MIN_BOTS || botCount > MAX_BOTS) {
+    return `Use ${MIN_BOTS.toLocaleString("en-US")} to ${MAX_BOTS.toLocaleString("en-US")} players.`;
   }
   if (botCount < (teamCount - 1) * TIERS.length) {
     return "Not enough bots for every non-Kaiji team to hold every tier.";

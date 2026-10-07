@@ -1,6 +1,6 @@
 # Texas Poker Kaiji
 
-An offline six-max Texas Hold'em ladder. Kaiji plays one static shove chart. A seeded field of at least a thousand bots — GTO-style, Elo-dynamic, frozen, and locally adapting — shares the same rating pool. The app is here to test a friend's claim: in this room, updating a strategy is wasted work.
+An offline six-max Texas Hold'em ladder. Kaiji plays one static shove chart. A seeded field of 50 to 1,200 bots — GTO-style, Elo-dynamic, frozen, and locally adapting — shares the same rating pool. The app is here to test a friend's claim: in this room, updating a strategy is wasted work.
 
 No server, no API keys, no network calls at runtime. Ratings stay in `localStorage`.
 
@@ -21,7 +21,7 @@ Open [http://127.0.0.1:47221](http://127.0.0.1:47221).
 - **Blind bet required** posts 50/100. Off, nobody posts; an all-check hand moves 0 chips. The minimum opening bet stays 100.
 - **Heads-up** rates you and the player across from you after 240 hands, with the same K=32 formula as the six-max table. Match randomly, sit Kaiji, or choose a style or personality and draw one player of that type. Next hand stays with that player. New opponent draws again. A shorter sit is not rated. While that tab is open, other players play their own heads-up matches and the ladder on the screen moves with them. A locked run does not move. Sound on starts a synthesized pulse and hits for cards, chips, an all-in, and the result. The browser only starts audio after you tap.
 - **Experiment** states the claim and plots Elo and chips from the run. The verdict is computed. A deadline locks Kaiji's final Elo.
-- **New run** sets the seed and the player count (at least 1,000, default 1,200). There are no teams. The same seed repeats the deals.
+- **New run** sets the seed and the player count (50 to 1,200, default 1,200). There are no teams. The same seed repeats the deals.
 - **Ladder** ranks each player by their own Elo. Switch between the top 20 and the top 100.
 - **Win rate**, shown to the left of Kaiji's Elo, is the share of rated matches in which he tied or took the best chip result.
 - Phones can play it in Safari or Chrome. Add it to the home screen if you want it full screen. Heads-up buttons sit at the bottom of the felt.

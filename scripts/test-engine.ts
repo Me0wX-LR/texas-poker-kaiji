@@ -156,6 +156,23 @@ check("deadline window is 1008 matches", DEFAULT_MATCH_DEADLINE === 1008);
 
 const field = generateField("kaiji-2026", 7, 1200);
 check("1200 bots", field.bots.length === 1200);
+const small = generateField("small-room", 7, 50);
+const smallTiers = new Set(small.bots.map((bot) => bot.tier));
+check("50 bots is a full field", small.bots.length === 50 && smallTiers.size === 4);
+let refused = false;
+try {
+  generateField("small-room", 7, 49);
+} catch {
+  refused = true;
+}
+check("49 bots is refused", refused);
+refused = false;
+try {
+  generateField("small-room", 7, 1201);
+} catch {
+  refused = true;
+}
+check("1201 bots is refused", refused);
 const ids = new Set(field.bots.map((bot) => bot.id));
 const sigs = new Set(field.bots.map(botSignature));
 check("stable unique ids", ids.size === 1200);
