@@ -6,7 +6,7 @@ import { applyKaijiPopulation, botSignature, generateField, teamName, teamPools,
 import { drawPracticeSeats, selectPracticeBot } from "../src/lib/controller";
 import { decryptHoles, encryptHoles, makeSeatKeys } from "../src/lib/room-crypto";
 import { SEAT_STALE_MS, TableHost, hostStillAlive, seatChoices } from "../src/lib/room-host";
-import { cleanRoomCode, seatSpot, turnText, visibleHole, type SeatView } from "../src/lib/table-view";
+import { cleanChatText, cleanRoomCode, seatSpot, turnText, visibleHole, type SeatView } from "../src/lib/table-view";
 import { HandMachine, playHand, type Decision } from "../src/lib/hand";
 import { kaijiDecision, kaijiPostflopShove, kaijiPreflopShove } from "../src/lib/kaiji";
 import { drawRound, playHeadsUpMatch, playRatedMatch, tableSizes } from "../src/lib/match";
@@ -536,6 +536,9 @@ check("a player sees their own cards", JSON.stringify(visibleHole(secretHole, tr
 check("another seat stays face down", visibleHole(secretHole, false, false, false) === "back");
 check("a folded opponent is mucked", visibleHole(secretHole, false, true, true) === "muck");
 check("showdown turns a live hand face up", JSON.stringify(visibleHole(secretHole, false, true, false)) === JSON.stringify(secretHole));
+check("chat keeps a short spoken line", cleanChatText("  hello\nthere  ") === "hello there");
+check("chat drops an empty line", cleanChatText(" \n\t ") === "");
+check("chat stops at 160 characters", cleanChatText("a".repeat(200)).length === 160);
 check("a room code drops letters that look like digits", cleanRoomCode("ab1iol") === "ABL");
 
 const roomBots = generateField("room-table", 7, 50).bots;

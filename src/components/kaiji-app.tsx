@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Settings } from "lucide-react";
 import { PlayingCard } from "@/components/cards";
 import { LineChart, type ChartLine } from "@/components/elo-chart";
 import { HeadsUp } from "@/components/heads-up";
@@ -56,6 +57,8 @@ export function KaijiApp() {
   const [deadlineFocus, setDeadlineFocus] = useState(false);
   const [deadlineError, setDeadlineError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [tab, setTab] = useState("table");
+  const [simOpen, setSimOpen] = useState(true);
 
   useEffect(() => {
     const sim = new SimController();
@@ -148,6 +151,16 @@ export function KaijiApp() {
           <h1 className="font-display text-sm sm:text-base">Texas Poker Kaiji</h1>
           <p className="hidden text-sm text-muted-foreground sm:block">A static shove, sat against a field that is allowed to change its mind.</p>
         </div>
+        <Button
+          type="button"
+          className="min-h-11 min-w-11 px-3"
+          variant={simOpen ? "default" : "outline"}
+          aria-pressed={simOpen}
+          aria-label={simOpen ? "Hide match controls" : "Show match controls"}
+          onClick={() => setSimOpen((value) => !value)}
+        >
+          <Settings className="size-5" />
+        </Button>
         <div className="ml-auto flex gap-2">
           <div className="min-w-[5.5rem] rounded-xl border bg-card px-3 py-2 text-right">
             <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Win rate</p>
@@ -174,6 +187,7 @@ export function KaijiApp() {
       ) : null}
       {snap.notice ? <p className="text-sm text-muted-foreground">{snap.notice}</p> : null}
 
+      {simOpen ? (
       <section className="grid gap-3 rounded-xl border bg-card p-3">
         <div className="flex flex-wrap items-center gap-2">
           {snap.running ? (
@@ -272,8 +286,21 @@ export function KaijiApp() {
           {snap.blindsMixed ? " · Blinds changed during the run" : ""}
         </p>
       </section>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Match {snap.matchesCompleted.toLocaleString("en-US")} / {snap.matchDeadline.toLocaleString("en-US")}. The gear brings the speed and the deadline back.
+        </p>
+      )}
 
-      <Tabs defaultValue="table">
+      <Tabs
+        value={tab}
+        onValueChange={(value) => {
+          const next = String(value);
+          setTab(next);
+          if (next === "heads" || next === "six") setSimOpen(false);
+          if (next === "table") setSimOpen(true);
+        }}
+      >
         <TabsList className="flex h-auto w-full flex-wrap">
           <TabsTrigger className="min-h-11 px-3" value="table">The table</TabsTrigger>
           <TabsTrigger className="min-h-11 px-3" value="ladder">Ladder</TabsTrigger>

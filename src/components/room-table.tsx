@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Settings } from "lucide-react";
 import { PokerTable } from "@/components/poker-table";
+import { TableChat, type ChatLine } from "@/components/table-chat";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
 import { MIN_TEAMS, TIER_LABEL, formatChips } from "@/lib/constants";
 import type { PracticePool, SeatRequest } from "@/lib/controller";
@@ -14,7 +17,7 @@ import { openRoomBus, type RoomBus, type RoomEvent } from "@/lib/room-bus";
 import { SEAT_STALE_MS, TableHost, hostStillAlive, hostView, seatChoices } from "@/lib/room-host";
 import { Rng, hashString } from "@/lib/rng";
 import { TableAudio } from "@/lib/table-audio";
-import { cleanPlayerName, cleanRoomCode, makeRoomCode, streetLabel, turnText, visibleHole, type HoleView, type TableView } from "@/lib/table-view";
+import { cleanChatText, cleanPlayerName, cleanRoomCode, makeRoomCode, streetLabel, turnText, visibleHole, type HoleView, type TableView } from "@/lib/table-view";
 
 interface WireSeat {
   name: string;
@@ -88,6 +91,12 @@ export function RoomTable({
   const [hostGone, setHostGone] = useState(false);
   const [picking, setPicking] = useState<number | null>(null);
   const [pickQuery, setPickQuery] = useState("");
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [chairsOn, setChairsOn] = useState(false);
+  const [chatLines, setChatLines] = useState<ChatLine[]>([]);
+  const [unread, setUnread] = useState(0);
+  const toolsOpenRef = useRef(false);
+  const lastChat = useRef(0);
   const clientId = useRef(rememberPlayerId(role));
   const keys = useRef<SeatKeys | null>(null);
   const bus = useRef<RoomBus | null>(null);
@@ -269,7 +278,42 @@ export function RoomTable({
     await publishTail.current;
   }
 
+  function pushChat(line: ChatLine) {
+    setChatLines((current) => [...current, line].slice(-40));
+    if (!toolsOpenRef.current) setUnread((count) => Math.min(9, count + 1));
+  }
+
+  function openTools() {
+    toolsOpenRef.current = true;
+    setUnread(0);
+    setToolsOpen(true);
+  }
+
+  function sendChat(text: string) {
+    const clean = cleanChatText(text);
+    if (!clean || !bus.current) return;
+    const now = Date.now();
+    if (now - lastChat.current < 400) return;
+    lastChat.current = now;
+    const id = nextId();
+    pushChat({ id, name: cleanPlayerName(name), text: clean });
+    bus.current.publish({
+      id,
+      type: "chat",
+      clientId: clientId.current,
+      body: { name: cleanPlayerName(name), text: clean },
+    });
+  }
+
   function onEvent(event: RoomEvent) {
+    if (event.type === "chat") {
+      if (event.clientId === clientId.current) return;
+      const body = event.body as { name?: string; text?: string };
+      const text = cleanChatText(typeof body?.text === "string" ? body.text : "");
+      if (!text) return;
+      pushChat({ id: event.id, name: cleanPlayerName(typeof body?.name === "string" ? body.name : "Player"), text });
+      return;
+    }
     if (event.clientId === clientId.current && event.type !== "join") return;
     if (role === "host") {
       const table = host.current;
@@ -556,6 +600,17 @@ export function RoomTable({
           <div className="mt-2 flex flex-wrap gap-2">
             <Button
               type="button"
+              className="min-h-11 min-w-11 px-3"
+              variant={toolsOpen ? "default" : "outline"}
+              aria-label={unread > 0 ? `Table tools, ${unread} new messages` : "Table tools"}
+              aria-expanded={toolsOpen}
+              onClick={openTools}
+            >
+              <Settings className="size-5" />
+              <span className="ml-1">{unread > 0 ? `Chat ${unread}` : "Chat"}</span>
+            </Button>
+            <Button
+              type="button"
               className="min-h-11"
               variant="outline"
               onClick={() => {
@@ -572,13 +627,50 @@ export function RoomTable({
           {error ? <p className="mt-2 text-sm text-[#ffb4b4]">{error}</p> : null}
         </div>
       )}
+      <Dialog
+        open={toolsOpen}
+        onOpenChange={(open) => {
+          toolsOpenRef.current = open;
+          setToolsOpen(open);
+          if (open) setUnread(0);
+        }}
+      >
+        <DialogContent className="flex max-h-[min(36rem,85dvh)] flex-col gap-3 overflow-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Table</DialogTitle>
+          </DialogHeader>
+          <TableChat lines={chatLines} onSend={sendChat} />
+          {role === "host" ? (
+            <Button type="button" className="min-h-11" variant={chairsOn ? "default" : "outline"} onClick={() => setChairsOn((value) => !value)}>
+              {chairsOn ? "Hide chairs" : "Show chairs"}
+            </Button>
+          ) : (
+            <p className="text-xs leading-relaxed text-muted-foreground">The host seats players and kicks from the gear on their phone.</p>
+          )}
+          {link ? (
+            <Button
+              type="button"
+              className="min-h-11"
+              variant="outline"
+              onClick={() => {
+                void navigator.clipboard?.writeText(link).then(() => {
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1200);
+                });
+              }}
+            >
+              {copied ? "Copied" : "Copy join link"}
+            </Button>
+          ) : null}
+        </DialogContent>
+      </Dialog>
       {hostGone ? (
         <div data-testid="host-gone" className="rounded-xl border border-[#6b3030] bg-[#2a1212] p-4">
           <p className="text-lg leading-snug text-[#ffe8e0]">The host disconnected. This game is over.</p>
         </div>
       ) : view ? (
         <>
-          {role === "host" ? (
+          {role === "host" && (chairsOn || !hand) ? (
             <div className="order-3 sm:order-1">
             <HostChairs
               seats={view.seats}
@@ -615,6 +707,18 @@ export function RoomTable({
             onVacate={code && role === "host" && (!hand || hand.phase === "done") ? sit : undefined}
           />
           <div className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 rounded-xl border border-black bg-[#101010]/95 p-2 backdrop-blur">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <Button
+                type="button"
+                className="min-h-11 px-3"
+                variant="outline"
+                aria-label={unread > 0 ? `Table tools, ${unread} new messages` : "Table tools"}
+                onClick={openTools}
+              >
+                <Settings className="size-5" />
+                <span className="ml-1">{unread > 0 ? `Chat ${unread}` : "Chat"}</span>
+              </Button>
+            </div>
             {role === "host" && (!hand || hand.phase === "done") ? (
               <Button className="min-h-12 w-full text-base" onClick={deal}>
                 {hand ? "Next hand" : "Deal the hand"}

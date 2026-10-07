@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Settings } from "lucide-react";
 import { PokerTable } from "@/components/poker-table";
 import { RoomTable } from "@/components/room-table";
 import { Button } from "@/components/ui/button";
@@ -76,6 +77,7 @@ export function SixMax({
   const [seats, setSeats] = useState<(PracticeSeat | null)[]>([null, null, null, null, null]);
   const [mode, setMode] = useState<"random" | "choose">("random");
   const [play, setPlay] = useState<"solo" | "host" | "join">("solo");
+  const [extras, setExtras] = useState(false);
   const [joinCode, setJoinCode] = useState("");
   const playRef = useRef(play);
   playRef.current = play;
@@ -381,7 +383,8 @@ export function SixMax({
 
   return (
     <section ref={rootRef} data-testid="six-max" className="flex flex-col gap-4">
-      <div className="grid grid-cols-3 gap-2">
+      <div className="flex items-center gap-2">
+      <div className="grid flex-1 grid-cols-3 gap-2">
         <Button type="button" className="min-h-11" variant={play === "solo" ? "default" : "outline"} aria-pressed={play === "solo"} onClick={() => setPlay("solo")}>
           Solo
         </Button>
@@ -391,6 +394,19 @@ export function SixMax({
         <Button type="button" className="min-h-11" variant={play === "join" ? "default" : "outline"} aria-pressed={play === "join"} onClick={() => setPlay("join")}>
           Join
         </Button>
+      </div>
+      {play === "solo" ? (
+        <Button
+          type="button"
+          className="min-h-11 min-w-11 px-3"
+          variant={extras ? "default" : "outline"}
+          aria-pressed={extras}
+          aria-label={extras ? "Hide seats and ladder" : "Show seats and ladder"}
+          onClick={() => setExtras((value) => !value)}
+        >
+          <Settings className="size-5" />
+        </Button>
+      ) : null}
       </div>
       {play !== "solo" ? (
         <>
@@ -403,7 +419,7 @@ export function SixMax({
         </>
       ) : (
       <>
-      <div className={`order-3 lg:order-none ${hand && hand.phase !== "done" ? "max-lg:hidden" : ""}`}>
+      <div className={`order-3 lg:order-none ${hand && hand.phase !== "done" && !extras ? "hidden" : ""}`}>
       <TableSetup
         mode={mode}
         setMode={setMode}
@@ -418,20 +434,24 @@ export function SixMax({
         onDeal={() => deal()}
       />
       </div>
+      {extras ? (
       <div className="order-4 lg:order-none">
       <LiveLadder ladder={ladder} duels={fieldDuels} locked={locked} yourElo={yourElo} seats={seats} />
       </div>
+      ) : null}
       <div className="order-2 grid gap-4 lg:order-none lg:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="flex flex-col gap-3">
           <PokerTable view={soloView} />
           <div ref={actionRef} className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 rounded-xl border border-black/50 bg-[#101010]/95 p-2 backdrop-blur">
+            <div className="mb-2 flex justify-end">
+              <SoundButton on={soundOn} onToggle={toggleSound} />
+            </div>
             {error ? <p className="mb-2 text-sm text-[#ffb4b4]">{error}</p> : null}
             {!hand ? (
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <Button className="min-h-12" size="lg" onClick={() => deal()}>
                   Deal the hand
                 </Button>
-                <SoundButton on={soundOn} onToggle={toggleSound} />
               </div>
             ) : null}
             {hand && hand.phase === "done" ? (
@@ -505,12 +525,9 @@ export function SixMax({
         </div>
 
 
-        <aside className="flex flex-col gap-3">
+        <aside className={`flex flex-col gap-3 ${extras ? "" : "hidden"}`}>
           <div className="rounded-xl border bg-card p-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Session chips</p>
-              <SoundButton on={soundOn} onToggle={toggleSound} />
-            </div>
+            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Session chips</p>
             <p className="mt-1 text-sm">
               You {formatChips(nets[0] ?? 0)} · {formatElo(yourElo)}
             </p>

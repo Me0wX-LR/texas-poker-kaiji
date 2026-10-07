@@ -2,7 +2,7 @@ import { connectMqtt, type MqttLink } from "./mqtt-ws";
 
 export interface RoomEvent {
   id: string;
-  type: "join" | "leave" | "act" | "close" | "drop" | "here" | "kick" | "refuse" | "state";
+  type: "join" | "leave" | "act" | "close" | "drop" | "here" | "kick" | "refuse" | "state" | "chat";
   clientId: string;
   seq?: number;
   body: unknown;

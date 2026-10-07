@@ -17,6 +17,11 @@ export function cleanPlayerName(value: string): string {
   return name || "Player";
 }
 
+/** One line for the table chat. Blank after cleaning means "do not send". */
+export function cleanChatText(value: string): string {
+  return value.replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
 export interface SeatSpot {
   slot: number;
   /** Percent from the left of the scene. */
