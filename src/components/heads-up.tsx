@@ -337,7 +337,7 @@ function voice(actName: Act, current: HandMachine) {
                 ))}
               </div>
             </div>
-            <div className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 w-full rounded-xl border border-black/50 bg-[#08281e]/95 p-2 backdrop-blur">
+            <div className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 w-full rounded-xl border border-black/50 bg-[#101010]/95 p-2 backdrop-blur">
               {error ? <p className="mb-2 text-sm text-[#ffb4b4]">{error}</p> : null}
               {hand.phase === "done" ? (
                 <div className="grid grid-cols-2 gap-2">

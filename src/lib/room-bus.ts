@@ -77,9 +77,18 @@ export function openRoomBus(code: string, onEvent: (event: RoomEvent) => void, o
   tryBroker(0);
 
   function publish(event: RoomEvent, retain = false) {
+    if (closed) return;
     const payload = JSON.stringify(event);
-    channel?.postMessage(event);
-    mqtt?.publish(payload, retain);
+    try {
+      channel?.postMessage(event);
+    } catch {
+      /* the tab channel is already closed */
+    }
+    try {
+      mqtt?.publish(payload, retain);
+    } catch {
+      /* the socket is already closed */
+    }
   }
 
   function close() {

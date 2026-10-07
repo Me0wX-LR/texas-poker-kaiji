@@ -103,7 +103,7 @@ export function KaijiApp() {
       <main className="grid min-h-screen place-items-center px-6">
         <div className="max-w-sm text-center">
           <img src={asset("/kaiji.png")} alt="Kaiji" className="pixel-art mx-auto size-16 border-2 border-black shadow-[4px_4px_0_#000]" />
-          <p className="mt-4 font-display text-xs text-[#e2b657]">ざわ…</p>
+          <p className="mt-4 font-display text-xs text-[#ff6b6b]">ざわ…</p>
           <h1 className="mt-2 text-xl">Counting the chips</h1>
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
             The field is being seated from the seed. Nothing has been dealt yet.
@@ -144,7 +144,7 @@ export function KaijiApp() {
       <header className="flex flex-wrap items-center gap-3">
         <img src={asset("/kaiji.png")} alt="Kaiji" className="pixel-art size-12 border-2 border-black shadow-[3px_3px_0_#000] sm:size-14" />
         <div className="min-w-0 flex-1">
-          <p className="font-display text-[10px] tracking-[0.35em] text-[#e2b657]">ざわ…ざわ…</p>
+          <p className="font-display text-[10px] tracking-[0.35em] text-[#ff6b6b]">ざわ…ざわ…</p>
           <h1 className="font-display text-sm sm:text-base">Texas Poker Kaiji</h1>
           <p className="hidden text-sm text-muted-foreground sm:block">A static shove, sat against a field that is allowed to change its mind.</p>
         </div>

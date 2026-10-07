@@ -63,11 +63,14 @@ export function RoomTable({
   initialCode = "",
   blinds,
   bots,
+  active = true,
 }: {
   role: "host" | "guest";
   initialCode?: string;
   blinds: boolean;
   bots: () => Bot[];
+  /** False while another mode is on screen. The room stays connected. */
+  active?: boolean;
 }) {
   const [name, setName] = useState(role === "host" ? "You" : "");
   const [savedName, setSavedName] = useState("");
@@ -85,7 +88,7 @@ export function RoomTable({
   const [hostGone, setHostGone] = useState(false);
   const [picking, setPicking] = useState<number | null>(null);
   const [pickQuery, setPickQuery] = useState("");
-  const clientId = useRef(rememberPlayerId());
+  const clientId = useRef(rememberPlayerId(role));
   const keys = useRef<SeatKeys | null>(null);
   const bus = useRef<RoomBus | null>(null);
   const host = useRef<TableHost | null>(null);
@@ -120,6 +123,10 @@ export function RoomTable({
       setSavedName("");
     }
   }, [role]);
+
+  useEffect(() => {
+    audio.current?.setAudible(active);
+  }, [active]);
 
   useEffect(() => {
     const table = audio.current ?? new TableAudio();
@@ -572,6 +579,7 @@ export function RoomTable({
       ) : view ? (
         <>
           {role === "host" ? (
+            <div className="order-3 sm:order-1">
             <HostChairs
               seats={view.seats}
               between={!hand || hand.phase === "done"}
@@ -589,7 +597,9 @@ export function RoomTable({
               onKick={kickSeat}
               onRemove={sit}
             />
+            </div>
           ) : null}
+          <div className="order-1 sm:order-2">
           <PokerTable
             view={view}
             onSit={
@@ -604,7 +614,7 @@ export function RoomTable({
             }
             onVacate={code && role === "host" && (!hand || hand.phase === "done") ? sit : undefined}
           />
-          <div className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 rounded-xl border border-black/50 bg-[#08281e]/95 p-2 backdrop-blur">
+          <div className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 rounded-xl border border-black bg-[#101010]/95 p-2 backdrop-blur">
             {role === "host" && (!hand || hand.phase === "done") ? (
               <Button className="min-h-12 w-full text-base" onClick={deal}>
                 {hand ? "Next hand" : "Deal the hand"}
@@ -667,6 +677,7 @@ export function RoomTable({
           <p className="text-xs text-muted-foreground">
             Session {view.seats.map((seat, index) => (seat.empty ? null : `${seat.name} ${formatChips((local?.nets ?? wire?.nets ?? [])[index] ?? 0)}`)).filter(Boolean).join(" · ")}
           </p>
+          </div>
         </>
       ) : null}
     </div>
@@ -869,8 +880,8 @@ function PoolChoice({ label, onPick }: { label: string; onPick: () => void }) {
   );
 }
 
-function rememberPlayerId(): string {
-  const key = "kaiji-player-id";
+function rememberPlayerId(role: "host" | "guest"): string {
+  const key = role === "host" ? "kaiji-player-id-host" : "kaiji-player-id-guest";
   if (typeof window === "undefined") return "pending";
   try {
     const existing = sessionStorage.getItem(key);

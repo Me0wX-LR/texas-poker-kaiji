@@ -153,7 +153,11 @@ export function connectMqtt(
   return {
     publish(payload: string, retain = false) {
       if (!ready || socket.readyState !== WebSocket.OPEN) return;
-      socket.send(publishPacket(topic, payload, retain));
+      try {
+        socket.send(publishPacket(topic, payload, retain));
+      } catch {
+        /* the socket closed between the check and the send */
+      }
     },
     close() {
       dead = true;

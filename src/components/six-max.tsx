@@ -393,9 +393,17 @@ export function SixMax({
         </Button>
       </div>
       {play !== "solo" ? (
-        <RoomTable role={play === "host" ? "host" : "guest"} initialCode={joinCode} blinds={blinds} bots={bots} />
+        <>
+          <div className={play === "host" ? "contents" : "hidden"}>
+            <RoomTable role="host" active={play === "host"} blinds={blinds} bots={bots} />
+          </div>
+          <div className={play === "join" ? "contents" : "hidden"}>
+            <RoomTable role="guest" active={play === "join"} initialCode={joinCode} blinds={blinds} bots={bots} />
+          </div>
+        </>
       ) : (
       <>
+      <div className={`order-3 lg:order-none ${hand && hand.phase !== "done" ? "max-lg:hidden" : ""}`}>
       <TableSetup
         mode={mode}
         setMode={setMode}
@@ -409,11 +417,14 @@ export function SixMax({
         showDeal={!hand}
         onDeal={() => deal()}
       />
+      </div>
+      <div className="order-4 lg:order-none">
       <LiveLadder ladder={ladder} duels={fieldDuels} locked={locked} yourElo={yourElo} seats={seats} />
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
+      </div>
+      <div className="order-2 grid gap-4 lg:order-none lg:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="flex flex-col gap-3">
           <PokerTable view={soloView} />
-          <div ref={actionRef} className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 rounded-xl border border-black/50 bg-[#08281e]/95 p-2 backdrop-blur">
+          <div ref={actionRef} className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 rounded-xl border border-black/50 bg-[#101010]/95 p-2 backdrop-blur">
             {error ? <p className="mb-2 text-sm text-[#ffb4b4]">{error}</p> : null}
             {!hand ? (
               <div className="flex flex-wrap items-center justify-center gap-2">

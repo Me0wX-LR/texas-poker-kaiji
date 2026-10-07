@@ -20,8 +20,8 @@ export function PokerTable({
       const label = sceneRef.current?.querySelector("[data-turn-label]");
       if (!label || view.phase === "lobby") return;
       const rect = label.getBoundingClientRect();
-      const visible = rect.top >= 8 && rect.bottom <= window.innerHeight - 8;
-      if (!visible) label.scrollIntoView({ block: "center", behavior: "smooth" });
+      const offscreen = rect.bottom < 8 || rect.top > window.innerHeight - 96;
+      if (offscreen) label.scrollIntoView({ block: "nearest", behavior: "smooth" });
     };
     scroll();
     window.addEventListener("resize", scroll);
