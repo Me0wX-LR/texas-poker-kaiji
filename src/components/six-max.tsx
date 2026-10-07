@@ -66,6 +66,8 @@ export function SixMax({
   const audio = useRef<TableAudio | null>(null);
   const heardTurn = useRef(false);
   const rootRef = useRef<HTMLElement | null>(null);
+  const actionRef = useRef<HTMLDivElement | null>(null);
+  const pendingScroll = useRef(false);
   const seatsRef = useRef<(PracticeSeat | null)[]>([null, null, null, null, null]);
   const [seats, setSeats] = useState<(PracticeSeat | null)[]>([null, null, null, null, null]);
   const [mode, setMode] = useState<"random" | "choose">("random");
@@ -103,7 +105,7 @@ export function SixMax({
             visibleRef.current = entry.isIntersecting;
             table.setAudible(entry.isIntersecting);
           },
-          { threshold: 0.15 },
+          { threshold: 0 },
         )
       : null;
     if (node && observer) observer.observe(node);
@@ -273,6 +275,7 @@ export function SixMax({
       rng: rng.current,
       keepLog: true,
     });
+    pendingScroll.current = true;
     refresh();
   }
 
@@ -298,6 +301,14 @@ export function SixMax({
   useEffect(() => {
     if (yourTurn && !heardTurn.current) audio.current?.yourTurn();
     heardTurn.current = yourTurn;
+  }, [yourTurn, tick]);
+  useEffect(() => {
+    if (!handRef.current) return;
+    if (pendingScroll.current) {
+      pendingScroll.current = false;
+      document.querySelector("[data-your-cards]")?.scrollIntoView({ block: "center" });
+    }
+    if (yourTurn) actionRef.current?.scrollIntoView({ block: "nearest" });
   }, [yourTurn, tick]);
   const legal = yourTurn && hand ? hand.legal(0) : null;
   const street = hand ? STREETS[hand.street] ?? "Showdown" : "Waiting";
@@ -326,6 +337,8 @@ export function SixMax({
         findPlayers={findPlayers}
         onDraft={updateDraft}
         seated={seats}
+        showDeal={!hand}
+        onDeal={() => deal()}
       />
       <LiveLadder ladder={ladder} duels={fieldDuels} locked={locked} yourElo={yourElo} seats={seats} />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
@@ -352,7 +365,7 @@ export function SixMax({
               </div>
               {error ? <p className="max-w-sm text-sm text-[#ffb4b4]">{error}</p> : null}
               <div className="flex flex-wrap items-center justify-center gap-2">
-                <Button id="six-max-deal" className="min-h-12" size="lg" onClick={() => deal()}>
+                <Button className="min-h-12" size="lg" onClick={() => deal()}>
                   Deal the hand
                 </Button>
                 <SoundButton on={soundOn} onToggle={toggleSound} />
@@ -442,7 +455,7 @@ export function SixMax({
                 </div>
               </div>
 
-              <div className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 rounded-xl border border-black/50 bg-[#08281e]/95 p-2 backdrop-blur">
+              <div ref={actionRef} className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 rounded-xl border border-black/50 bg-[#08281e]/95 p-2 backdrop-blur">
                 {error ? <p className="mb-2 text-sm text-[#ffb4b4]">{error}</p> : null}
                 {hand.phase === "done" ? (
                   <div className="grid grid-cols-2 gap-2">
@@ -558,6 +571,8 @@ function TableSetup({
   findPlayers,
   onDraft,
   seated,
+  showDeal,
+  onDeal,
 }: {
   mode: "random" | "choose";
   setMode: (mode: "random" | "choose") => void;
@@ -568,6 +583,8 @@ function TableSetup({
   findPlayers: (query: string) => BotHit[];
   onDraft: (index: number, patch: Partial<SeatDraft>) => void;
   seated: (PracticeSeat | null)[];
+  showDeal: boolean;
+  onDeal: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -599,6 +616,11 @@ function TableSetup({
           Choose seats
         </Button>
       </div>
+      {showDeal ? (
+        <Button id="six-max-deal" type="button" className="mt-2 min-h-12 w-full text-base" onClick={onDeal}>
+          Deal the hand
+        </Button>
+      ) : null}
       {mode === "choose" ? (
         <div className="mt-3 grid gap-3">
           {drafts.map((draft, index) => {
