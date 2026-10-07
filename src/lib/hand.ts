@@ -45,6 +45,8 @@ export interface Ctx {
   canCall: boolean;
   canBet: boolean;
   canRaise: boolean;
+  /** Abstract actions already taken this street: f fold, x check, c call, b bet/raise, a all-in. */
+  line: string;
 }
 
 export interface HandOptions {
@@ -88,6 +90,8 @@ export class HandMachine {
   winners: number[] = [];
   showdown = false;
   lastAction = "";
+  /** Abstract actions already taken on the current street. */
+  line = "";
   scores: number[] = [];
   private deck: number[] = [];
   private actions = 0;
@@ -115,6 +119,7 @@ export class HandMachine {
     canCall: false,
     canBet: false,
     canRaise: false,
+    line: "",
   };
 
   constructor(options: HandOptions) {
@@ -213,6 +218,7 @@ export class HandMachine {
     ctx.canCall = legal.canCall;
     ctx.canBet = legal.canBet;
     ctx.canRaise = legal.canRaise;
+    ctx.line = this.line;
     return ctx;
   }
 
@@ -235,16 +241,20 @@ export class HandMachine {
       act = legal.canCall ? "call" : "fold";
     }
 
+    let code = "x";
     if (act === "fold" && legal.canFold) {
       this.folded[seat] = true;
       this.acted[seat] = true;
+      code = "f";
       this.note(seat, "folds");
     } else if (act === "check" && legal.canCheck) {
       this.acted[seat] = true;
+      code = "x";
       this.note(seat, "checks");
     } else if (act === "call" && legal.canCall) {
       this.commit(seat, Math.min(legal.toCall, this.stack[seat]));
       this.acted[seat] = true;
+      code = this.allin[seat] ? "a" : "c";
       this.note(seat, this.allin[seat] ? "calls all-in" : `calls ${legal.toCall}`);
     } else if (act === "bet" && legal.canBet) {
       let target = to;
@@ -257,6 +267,7 @@ export class HandMachine {
       this.lastFullRaise = Math.max(1, betSize);
       this.reopen(seat);
       this.acted[seat] = true;
+      code = this.allin[seat] ? "a" : "b";
       this.note(seat, this.allin[seat] ? "shoves" : `bets ${betSize}`);
     } else if (act === "raise" && legal.canRaise) {
       let target = to;
@@ -271,16 +282,21 @@ export class HandMachine {
         this.reopen(seat);
       }
       this.acted[seat] = true;
+      code = this.allin[seat] ? "a" : "b";
       this.note(seat, this.allin[seat] ? "shoves" : `raises to ${this.streetPut[seat]}`);
     } else if (legal.canCheck) {
       this.acted[seat] = true;
+      code = "x";
       this.note(seat, "checks");
     } else {
       this.folded[seat] = true;
       this.acted[seat] = true;
+      code = "f";
       this.note(seat, "folds");
     }
 
+    this.line += code;
+    if (this.line.length > 16) this.line = this.line.slice(-16);
     this.actions++;
     if (this.actions > 1500) throw new Error("Betting round did not close.");
     this.afterAction(seat);
@@ -290,6 +306,7 @@ export class HandMachine {
     if (this.phase !== "next-street") return;
     if (this.street < 3) {
       this.street++;
+      this.line = "";
       const need = this.street === 1 ? 3 : 1;
       for (let i = 0; i < need; i++) {
         const card = this.deck.pop();

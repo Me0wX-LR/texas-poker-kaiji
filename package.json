@@ -6,7 +6,8 @@
     "dev": "next dev -H 0.0.0.0 -p 47221",
     "build": "next build",
     "lint": "eslint",
-    "test:engine": "tsx scripts/test-engine.ts"
+    "test:engine": "tsx scripts/test-engine.ts",
+    "solve:gto": "cargo run --release --manifest-path solver/Cargo.toml"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

@@ -1,6 +1,7 @@
 import { BIG_BLIND } from "./constants";
 import type { Tier } from "./constants";
 import { handStrength, roughEquity } from "./eval";
+import { decideSolver } from "./gto";
 import type { Ctx, Decision } from "./hand";
 
 export interface BotParams {
@@ -97,6 +98,7 @@ export function learnFromHand(bot: Bot, obs: HandObs): void {
 }
 
 export function decideBot(bot: Bot, ctx: Ctx, rng: () => number): Decision {
+  if (bot.tier === "gto") return decideSolver(ctx, rng);
   const params = bot.params;
   const memory = bot.memory;
   let tight = memory.openShift;

@@ -1,6 +1,6 @@
 # Texas Poker Kaiji
 
-An offline six-max Texas Hold'em ladder. Kaiji plays one static shove chart. A seeded field of 50 to 1,200 bots — GTO-style, Elo-dynamic, frozen, and locally adapting — shares the same rating pool. The app is here to test a friend's claim: in this room, updating a strategy is wasted work.
+An offline six-max Texas Hold'em ladder. Kaiji plays one static shove chart. A seeded field of 50 to 1,200 bots — solver GTO, Elo-dynamic, frozen, and locally adapting — shares the same rating pool. The app is here to test a friend's claim: in this room, updating a strategy is wasted work.
 
 No server, no API keys, no network calls at runtime. Ratings stay in `localStorage`.
 
@@ -39,6 +39,8 @@ Odd chips in a split go to the first winner left of the button. A short all-in r
 Kaiji is one player and only plays the fixed chart. Each match seats him and every other player. His table keeps the same five opponents for all 240 hands. The other tables are only AIs, reshuffled every match. A player count that is not a multiple of six still seats everyone: a leftover seat becomes a short table, and a single leftover becomes a five-handed table plus a heads-up.
 
 Kaiji preflop: all-in with any pocket pair or AK, AQ, AJ, AT (suited or offsuit); otherwise check if free, else fold. Postflop: all-in with top pair or better (top pair and overpair must use a hole card; two pair or better always shoves); otherwise check if free, else fold.
+
+GTO-style bots do not use that chart. Postflop they sample a Discounted CFR strategy solved by [postflop-solver](https://github.com/b-inary/postflop-solver) (the open-source engine behind Desktop Postflop). The tree is heads-up, button versus big blind, 100bb, with 66% pot bets and 2.5x raises, on eight flops that stand in for the rest of the deck. Preflop they open or defend the same ranges that solve was given, so the postflop mix is the equilibrium for those ranges. Rebuild it with `npm run solve:gto` (needs Rust). The solver itself is AGPL-3.0-or-later and is downloaded by Cargo; it is not bundled into the site.
 
 ## Deploy to GitHub Pages
 

@@ -45,7 +45,7 @@ interface Style {
 }
 
 const GTO_STYLE: Style = {
-  personality: "Push-fold chart",
+  personality: "Solver GTO",
   open: 0.62,
   call: 0.5,
   three: 0.74,

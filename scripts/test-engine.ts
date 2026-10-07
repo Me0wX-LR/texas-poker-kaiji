@@ -1,4 +1,6 @@
 import { cardCode, categoryOf, evaluateCards, handStrength } from "../src/lib/eval";
+import { class169, decideSolver, solverFrequencies, streetTexture } from "../src/lib/gto";
+import type { Ctx } from "../src/lib/hand";
 import { eloUpdates, expectedScore, placementScores } from "../src/lib/elo";
 import { applyKaijiPopulation, botSignature, generateField, teamName, teamPools, tierPools } from "../src/lib/field";
 import { selectPracticeBot } from "../src/lib/controller";
@@ -298,6 +300,88 @@ const duel = playHeadsUpMatch({
 check("heads-up chips balance", Math.abs(duel.nets[0] + duel.nets[1]) < 1e-6, duel.nets.join(","));
 check("heads-up elo is zero-sum", Math.abs(duel.next[0] + duel.next[1] - leftElo - rightElo) < 1e-6);
 check("heads-up match can move a rating", duel.next[0] !== leftElo || duel.next[1] !== rightElo);
+
+function spot(over: Partial<Ctx>): Ctx {
+  return {
+    seat: 0,
+    hole0: c("7", "s"),
+    hole1: c("2", "h"),
+    board: [],
+    street: 0,
+    toCall: 100,
+    pot: 150,
+    stack: 10000,
+    streetPut: 0,
+    currentBet: 100,
+    minRaiseTo: 200,
+    minBetTo: 100,
+    maxTo: 10000,
+    pos: 0,
+    n: 6,
+    ownElo: INITIAL_ELO,
+    oppAvgElo: INITIAL_ELO,
+    facingShove: false,
+    canFold: true,
+    canCheck: false,
+    canCall: true,
+    canBet: false,
+    canRaise: true,
+    line: "",
+    ...over,
+  };
+}
+
+check("aces are the top pair class", class169(c("A", "s"), c("A", "h")) === 12);
+check("ace-king suited class", class169(c("A", "s"), c("K", "s")) === 90);
+const weakOpen = decideSolver(spot({}), () => 0);
+check("seven-deuce does not open the button", weakOpen.act === "fold");
+const aceOpen = decideSolver(spot({ hole0: c("A", "s"), hole1: c("A", "h") }), () => 0);
+check(
+  "aces open to two and a half blinds",
+  aceOpen.act === "raise" && aceOpen.to === 250,
+  JSON.stringify(aceOpen),
+);
+const dryKing = [c("K", "d"), c("7", "c"), c("2", "h")];
+check("ace on king-seven-deuce is an overcard", streetTexture(dryKing, c("A", "s")) === 1);
+check("a seven pairs that flop", streetTexture(dryKing, c("7", "d")) === 2);
+const flopSpot = spot({
+  hole0: c("A", "s"),
+  hole1: c("A", "h"),
+  board: dryKing,
+  street: 1,
+  toCall: 0,
+  pot: 550,
+  currentBet: 0,
+  pos: 2,
+  canFold: false,
+  canCheck: true,
+  canCall: false,
+  canBet: true,
+  canRaise: false,
+  line: "",
+});
+const flopMix = solverFrequencies(flopSpot);
+check(
+  "solver frequencies sum to one",
+  !!flopMix && Math.abs(flopMix.reduce((sum, value) => sum + value, 0) - 1) < 1e-6,
+  flopMix ? flopMix.map((value) => value.toFixed(3)).join(",") : "missing",
+);
+const suitedConnector = solverFrequencies(spot({ ...flopSpot, hole0: c("7", "s"), hole1: c("6", "s") }));
+check(
+  "aces bet this dry king more than seven-six suited",
+  !!flopMix && !!suitedConnector && flopMix[2] > suitedConnector[2],
+  `${flopMix?.[2]} vs ${suitedConnector?.[2]}`,
+);
+const flopAct = decideSolver(flopSpot, () => 0);
+check(
+  "a flop decision is check, bet, or all-in",
+  flopAct.act === "check" || flopAct.act === "bet" || flopAct.act === "allin",
+  flopAct.act,
+);
+check(
+  "gto bots are labeled solver GTO",
+  field.bots.some((bot) => bot.tier === "gto" && bot.params.personality === "Solver GTO"),
+);
 
 console.log(`match pace ${((HANDS_PER_MATCH / dt) * 1000).toFixed(0)} hands/sec`);
 if (failed) {

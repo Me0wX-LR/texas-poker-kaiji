@@ -639,7 +639,7 @@ function ExperimentPanel({
       <section className="rounded-xl border bg-card p-4">
         <h3 className="text-base">The field</h3>
         <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-          {snap.botCount.toLocaleString("en-US")} variants. GTO {snap.tierCounts.gto.toLocaleString("en-US")}, dynamic {snap.tierCounts.dynamic.toLocaleString("en-US")}, frozen {snap.tierCounts.frozen.toLocaleString("en-US")}, adapters {snap.tierCounts.agentic.toLocaleString("en-US")}. Frozen personalities were fixed when the seed was created. Adapters only rewrite their own thresholds from hands they sat.
+          {snap.botCount.toLocaleString("en-US")} variants. GTO {snap.tierCounts.gto.toLocaleString("en-US")}, dynamic {snap.tierCounts.dynamic.toLocaleString("en-US")}, frozen {snap.tierCounts.frozen.toLocaleString("en-US")}, adapters {snap.tierCounts.agentic.toLocaleString("en-US")}. GTO-style plays a Discounted CFR mix from postflop-solver: the button-versus-blind ranges before the flop, then that solver&apos;s check, 66% pot, call, and fold frequencies. Frozen personalities were fixed when the seed was created. Adapters only rewrite their own thresholds from hands they sat.
         </p>
         <Label htmlFor="bot-search" className="mt-3">
           Find a bot

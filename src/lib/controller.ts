@@ -495,6 +495,9 @@ export class SimController {
     if (bot.tier === "agentic") {
       return `${bot.params.personality} · open ${bot.memory.openShift.toFixed(3)}, bluff ${bot.memory.bluffShift.toFixed(3)}, after ${bot.memory.hands} hands`;
     }
+    if (bot.tier === "gto") {
+      return "Solver GTO · Discounted CFR from postflop-solver, button versus big blind";
+    }
     return `${bot.params.personality} · fixed push-fold chart and equity heuristic`;
   }
 
