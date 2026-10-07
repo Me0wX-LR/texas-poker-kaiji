@@ -358,6 +358,7 @@ export function SixMax({
           empty: false,
           human: true,
           isYou: true,
+          away: false,
           cards: visibleHole(hand ? hand.hole[0] : null, Boolean(hand), Boolean(hand?.showdown), Boolean(hand?.folded[0])),
           detail: hand ? positionName((6 - (hand.button % 6)) % 6, 6) : "You",
         };
@@ -371,6 +372,7 @@ export function SixMax({
         empty: !seat,
         human: false,
         isYou: false,
+        away: false,
         cards: visibleHole(hand && seat ? hand.hole[index] : null, false, Boolean(hand?.showdown), Boolean(hand?.folded[index])),
         detail: seat && hand ? `${positionName((index - hand.button + 6) % 6, 6)} · ${formatElo(eloOf(seat))}` : "Empty chair",
       };

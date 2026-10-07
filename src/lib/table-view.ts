@@ -58,6 +58,7 @@ export interface SeatView {
   empty: boolean;
   human: boolean;
   isYou: boolean;
+  away: boolean;
   cards: HoleView;
   detail: string;
 }
@@ -77,8 +78,10 @@ export interface TableView {
 export function turnText(view: Pick<TableView, "phase" | "actor" | "yourSeat" | "seats">): string {
   if (view.phase === "lobby") return "Take a seat";
   if (view.phase === "show" || view.actor < 0) return view.phase === "show" ? "Hand over" : "Dealing";
+  const actor = view.seats[view.actor];
+  if (actor?.away) return `${actor.name} disconnected`;
   if (view.actor === view.yourSeat) return "Your turn";
-  return `${view.seats[view.actor]?.name || "Player"} to act`;
+  return `${actor?.name || "Player"} to act`;
 }
 
 const STREETS = ["Preflop", "Flop", "Turn", "River"];

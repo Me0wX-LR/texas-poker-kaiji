@@ -19,6 +19,7 @@ interface WireSeat {
   kind: "human" | "ai" | "open";
   playerId: string | null;
   detail: string;
+  connected?: boolean;
 }
 
 interface WireLegal {
@@ -67,6 +68,7 @@ export function RoomTable({
   bots: () => Bot[];
 }) {
   const [name, setName] = useState(role === "host" ? "You" : "");
+  const [savedName, setSavedName] = useState("");
   const [codeInput, setCodeInput] = useState(initialCode);
   const [code, setCode] = useState("");
   const [relay, setRelay] = useState<RoomBus["relay"] | "idle">("idle");
@@ -77,7 +79,7 @@ export function RoomTable({
   const [ownCards, setOwnCards] = useState<number[] | null>(null);
   const [sizing, setSizing] = useState<number[] | null>(null);
   const [copied, setCopied] = useState(false);
-  const clientId = useRef(`p${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`);
+  const clientId = useRef(rememberPlayerId());
   const keys = useRef<SeatKeys | null>(null);
   const bus = useRef<RoomBus | null>(null);
   const host = useRef<TableHost | null>(null);
@@ -93,20 +95,33 @@ export function RoomTable({
   const refresh = () => setTick((value) => value + 1);
 
   useEffect(() => {
+    if (role !== "guest") return;
+    try {
+      const stored = sessionStorage.getItem("kaiji-player-name") ?? "";
+      setSavedName(stored);
+      if (stored) setName((current) => current || stored);
+    } catch {
+      setSavedName("");
+    }
+  }, [role]);
+
+  useEffect(() => {
     const table = audio.current ?? new TableAudio();
     audio.current = table;
     return () => {
-      bus.current?.publish({ id: nextId(), type: "close", clientId: clientId.current, body: null });
+      const mine = clientId.current;
+      if (role === "host") bus.current?.publish({ id: `${mine}-close`, type: "close", clientId: mine, body: null });
+      else bus.current?.publish({ id: `${mine}-drop`, type: "drop", clientId: mine, body: null });
       bus.current?.close();
       host.current = null;
       table.dispose();
       audio.current = null;
     };
-  }, []);
+  }, [role]);
 
   useEffect(() => {
     if (role !== "guest" || !code) return;
-    if (wire?.seats.some((seat) => seat.playerId === clientId.current)) return;
+    if (wire?.seats.some((seat) => seat.playerId === clientId.current && seat.connected !== false)) return;
     const timer = window.setInterval(() => {
       const publicKey = keys.current?.publicKey;
       if (!publicKey) return;
@@ -122,43 +137,66 @@ export function RoomTable({
 
   const local = host.current;
   const hand = local?.hand ?? null;
+  const publishRef = useRef(publish);
+  const aiFault = useRef("");
+  publishRef.current = publish;
 
   useEffect(() => {
-    const table = host.current;
-    if (!table?.hand || table.hand.phase !== "next-street") return;
-    const timer = window.setTimeout(() => {
-      table.advance();
-      audio.current?.street();
-      void publish();
-      refresh();
-    }, 520);
-    return () => window.clearTimeout(timer);
-  }, [tick]);
-
-  useEffect(() => {
-    const table = host.current;
-    if (!table?.hand || table.hand.phase !== "act") return;
-    const actor = table.hand.actor;
-    if (table.occupants[actor]?.kind !== "ai") return;
-    const timer = window.setTimeout(() => {
-      if (host.current?.aiStep()) {
-        const acted = host.current.hand?.lastAction ?? "";
-        if (acted.includes("fold")) audio.current?.fold();
-        else if (acted.includes("check")) audio.current?.check();
-        else if (acted.includes("shove")) audio.current?.allIn();
-        else audio.current?.chips();
-        void publish();
-        refresh();
+    if (!code || role !== "host") return;
+    const timer = window.setInterval(() => {
+      const table = host.current;
+      const live = table?.hand;
+      if (!table || !live) return;
+      try {
+        if (live.phase === "next-street") {
+          table.advance();
+          audio.current?.street();
+          void publishRef.current();
+          refresh();
+        } else if (live.phase === "act" && table.occupants[live.actor]?.kind === "ai") {
+          if (table.aiStep()) {
+            const acted = table.hand?.lastAction ?? "";
+            if (acted.includes("fold")) audio.current?.fold();
+            else if (acted.includes("check")) audio.current?.check();
+            else if (acted.includes("shove")) audio.current?.allIn();
+            else audio.current?.chips();
+            void publishRef.current();
+            refresh();
+          }
+        }
+        if (table.sweep()) {
+          setNotice("A player disconnected. Their chair is saved.");
+          void publishRef.current();
+          refresh();
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "The AI could not act.";
+        const key = `${table.handNo}:${live.actor}:${message}`;
+        if (aiFault.current !== key) {
+          aiFault.current = key;
+          setNotice(message);
+        }
       }
     }, 700);
-    return () => window.clearTimeout(timer);
-  }, [tick]);
+    return () => window.clearInterval(timer);
+  }, [code, role]);
 
   useEffect(() => {
-    if (!host.current || !bus.current) return;
-    const timer = window.setInterval(() => void publish(), 2000);
+    if (!code) return;
+    const timer = window.setInterval(() => {
+      if (role === "host") {
+        void publishRef.current();
+        return;
+      }
+      bus.current?.publish({
+        id: `${clientId.current.slice(0, 6)}-here-${Date.now().toString(36)}`,
+        type: "here",
+        clientId: clientId.current,
+        body: null,
+      });
+    }, 2000);
     return () => window.clearInterval(timer);
-  }, [code]);
+  }, [code, role]);
 
   function nextId(): string {
     return `${clientId.current.slice(0, 6)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -188,9 +226,21 @@ export function RoomTable({
         if (!body?.publicKey) return;
         const result = table.claim(event.clientId, body.name ?? "Player", body.publicKey, body.seat ?? null);
         if ("error" in result) setNotice(result.error);
-        else setNotice(`${cleanPlayerName(body.name ?? "Player")} sat down.`);
+        else setNotice(`${cleanPlayerName(body.name ?? "Player")} ${result.rejoined ? "sat back down" : "sat down"}.`);
         void publish();
         refresh();
+      } else if (event.type === "drop") {
+        const dropped = table.markDropped(event.clientId);
+        if (dropped) setNotice(`${dropped} disconnected. Their chair is saved.`);
+        void publish();
+        refresh();
+      } else if (event.type === "here") {
+        const back = table.noteHere(event.clientId);
+        if (back) {
+          setNotice(`${back} sat back down.`);
+          void publish();
+          refresh();
+        }
       } else if (event.type === "leave") {
         table.leave(event.clientId);
         void publish();
@@ -248,6 +298,12 @@ export function RoomTable({
     bus.current?.close();
     bus.current = openRoomBus(issued, onEvent, setRelay);
     setCode(issued);
+    try {
+      sessionStorage.setItem("kaiji-room-code", issued);
+      sessionStorage.setItem("kaiji-player-name", cleanPlayerName(nextName));
+    } catch {
+      /* private mode can refuse storage; the chair still works for this page */
+    }
     audio.current?.unlock();
     if (role === "guest") {
       window.setTimeout(() => {
@@ -266,7 +322,12 @@ export function RoomTable({
 
   function sendAct(decision: Decision) {
     if (role === "host") {
-      const problem = host.current?.act(clientId.current, decision) ?? "The table is not open.";
+      const table = host.current;
+      if (!table) {
+        setError("The table is not open.");
+        return;
+      }
+      const problem = table.act(clientId.current, decision);
       if (problem) setError(problem);
       else {
         setError(null);
@@ -290,8 +351,13 @@ export function RoomTable({
   }
 
   function deal() {
-    host.current?.setBlinds(blindsRef.current);
-    const problem = host.current?.deal(botsRef.current()) ?? "The table is not open.";
+    const table = host.current;
+    if (!table) {
+      setError("The table is not open.");
+      return;
+    }
+    table.setBlinds(blindsRef.current);
+    const problem = table.deal(botsRef.current());
     if (problem) setError(problem);
     else {
       setError(null);
@@ -323,7 +389,7 @@ export function RoomTable({
   const link = code && typeof window !== "undefined" ? `${window.location.origin}${window.location.pathname}#table-${code}` : "";
 
   return (
-    <div className="flex flex-col gap-3" data-testid="room-table">
+    <div className="flex flex-col gap-3" data-testid="room-table" data-rev={tick}>
       {!code ? (
         <div className="rounded-xl border bg-card p-3">
           <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{role === "host" ? "Host" : "Join"}</p>
@@ -351,11 +417,14 @@ export function RoomTable({
             </label>
           ) : null}
           {error ? <p className="mt-2 text-sm text-[#ffb4b4]">{error}</p> : null}
-          <Button className="mt-3 min-h-12 w-full" onClick={() => void connect(role === "host" ? "" : codeInput, name)}>
-            {role === "host" ? "Open the table" : "Sit down"}
+          <Button className="mt-3 min-h-12 w-full" onClick={() => void connect(role === "host" ? "" : codeInput, savedName && !name.trim() ? savedName : name)}>
+            {role === "host" ? "Open the table" : savedName && cleanPlayerName(name || savedName) === savedName ? "Sit back down" : "Sit down"}
           </Button>
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
             Share the code with the people at the table. Empty chairs become AIs when the host deals. The host deals the cards. Hole cards are encrypted to each seat. This table does not move the ladder.
+            {role === "guest"
+              ? " If you disconnect, your chair stays. Sit back down with the same name, even in the middle of a hand. The host's chair does not."
+              : " A friend who disconnects keeps their chair until they sit back down with the same name. You can free that chair between hands."}
           </p>
         </div>
       ) : (
@@ -490,6 +559,7 @@ async function wireFrom(table: TableHost, mine: SeatKeys): Promise<WireState> {
       kind: seat.kind,
       playerId: seat.playerId,
       detail: seat.detail,
+      connected: seat.connected,
     })),
   };
   const holes: (string | null)[] = [null, null, null, null, null, null];
@@ -503,6 +573,20 @@ async function wireFrom(table: TableHost, mine: SeatKeys): Promise<WireState> {
     }
   }
   return { ...publicState, hostPub: mine.publicKey, holes, revealed, legal };
+}
+
+function rememberPlayerId(): string {
+  const key = "kaiji-player-id";
+  if (typeof window === "undefined") return "pending";
+  try {
+    const existing = sessionStorage.getItem(key);
+    if (existing) return existing;
+    const created = `p${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
+    sessionStorage.setItem(key, created);
+    return created;
+  } catch {
+    return `p${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
+  }
 }
 
 function guestTable(wire: WireState, myId: string, ownCards: number[] | null): TableView {
@@ -520,7 +604,9 @@ function guestTable(wire: WireState, myId: string, ownCards: number[] | null): T
     lastAction: wire.lastAction,
     seats: wire.seats.map((seat, index) => {
       const hole = seat.playerId === myId ? ownCards : wire.revealed[index];
+      const away = seat.kind === "human" && seat.connected === false;
       const cards: HoleView = seat.kind === "open" ? "back" : visibleHole(hole, seat.playerId === myId && !!ownCards, wire.showdown, wire.folded[index]);
+      const detail = away ? "Disconnected" : seat.detail;
       return {
         name: seat.name,
         stack: wire.stacks[index] ?? 0,
@@ -529,8 +615,9 @@ function guestTable(wire: WireState, myId: string, ownCards: number[] | null): T
         empty: seat.kind === "open",
         human: seat.kind === "human",
         isYou: seat.playerId === myId,
+        away,
         cards,
-        detail: wire.phase === "lobby" ? seat.detail : `${positionName((index - wire.button + 6) % 6, 6)} · ${seat.detail}`,
+        detail: wire.phase === "lobby" ? detail : `${positionName((index - wire.button + 6) % 6, 6)} · ${detail}`,
       };
     }),
   };

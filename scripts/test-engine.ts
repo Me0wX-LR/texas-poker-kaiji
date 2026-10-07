@@ -5,8 +5,8 @@ import { eloUpdates, expectedScore, placementScores } from "../src/lib/elo";
 import { applyKaijiPopulation, botSignature, generateField, teamName, teamPools, tierPools } from "../src/lib/field";
 import { drawPracticeSeats, selectPracticeBot } from "../src/lib/controller";
 import { decryptHoles, encryptHoles, makeSeatKeys } from "../src/lib/room-crypto";
-import { TableHost } from "../src/lib/room-host";
-import { cleanRoomCode, seatSpot, visibleHole } from "../src/lib/table-view";
+import { SEAT_STALE_MS, TableHost } from "../src/lib/room-host";
+import { cleanRoomCode, seatSpot, turnText, visibleHole, type SeatView } from "../src/lib/table-view";
 import { HandMachine, playHand, type Decision } from "../src/lib/hand";
 import { kaijiDecision, kaijiPostflopShove, kaijiPreflopShove } from "../src/lib/kaiji";
 import { drawRound, playHeadsUpMatch, playRatedMatch, tableSizes } from "../src/lib/match";
@@ -561,6 +561,38 @@ check(
 );
 tableHost.vacate(1);
 check("an AI stays seated during a hand", tableHost.occupants[1]?.kind === "ai");
+
+const back = new TableHost("host", "You", false, new Rng(3));
+const friend = back.claim("bea", "Bea", "pk", null);
+check("a friend sits in an open chair", "seat" in friend && friend.seat === 1);
+check("dropping keeps the chair", back.markDropped("bea") === "Bea" && back.occupants[1]?.connected === false && back.occupants[1]?.name === "Bea");
+check("the host cannot be dropped", back.markDropped("host") === null && back.occupants[0]?.connected === true);
+const dealtBack = back.deal(roomBots);
+check("a hand can start with a saved chair", dealtBack === null, dealtBack ?? "");
+const rejoined = back.claim("bea-2", "bea", "pk-2", null);
+check(
+  "a disconnected friend can rejoin during a hand",
+  "seat" in rejoined && rejoined.rejoined === true && rejoined.seat === 1 && back.occupants[1]?.playerId === "bea-2" && back.occupants[1]?.connected === true && back.occupants[1]?.publicKey === "pk-2",
+);
+const steal = back.claim("cy", "Bea", "pk-3", null);
+check("a connected name cannot be taken", "error" in steal);
+back.markDropped("bea-2");
+const other = back.claim("cy", "Cy", "pk-4", null);
+check("a new name waits for the next hand", "error" in other);
+const quiet = new TableHost("host", "You", false, new Rng(4));
+quiet.claim("ann", "Ann", "pk", 2);
+quiet.occupants[2].lastSeen = 1_000;
+check("a quiet friend is marked disconnected", quiet.sweep(1_000 + SEAT_STALE_MS + 1) && quiet.occupants[2]?.connected === false);
+quiet.claim("bo", "Bo", "pk", 3);
+check("a fresh friend stays connected", !quiet.sweep(Date.now()) && quiet.occupants[3]?.connected === true && quiet.occupants[0]?.connected === true);
+quiet.markDropped("ann");
+quiet.vacate(2);
+check("the host can free a disconnected chair between hands", quiet.occupants[2]?.kind === "open");
+const awaySeat = { name: "Bea", away: true } as SeatView;
+check(
+  "a disconnected actor is named",
+  turnText({ phase: "act", actor: 1, yourSeat: 0, seats: [{ name: "You", away: false } as SeatView, awaySeat] }) === "Bea disconnected",
+);
 
 console.log(`match pace ${((HANDS_PER_MATCH / dt) * 1000).toFixed(0)} hands/sec`);
 if (failed) {

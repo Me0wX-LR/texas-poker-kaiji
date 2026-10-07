@@ -313,6 +313,16 @@
   opacity: 0.55;
 }
 
+.table-seat.away .table-avatar {
+  filter: grayscale(1);
+  opacity: 0.72;
+  box-shadow: 0 0 0 2px #c46b6b;
+}
+
+.table-flag.away {
+  color: #ffb4b4;
+}
+
 .table-cushion {
   width: 4.4rem;
   height: 0.95rem;

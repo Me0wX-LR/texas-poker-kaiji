@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { PlayingCard } from "@/components/cards";
 import { seatSpot, turnText, type TableView } from "@/lib/table-view";
 
@@ -13,8 +14,21 @@ export function PokerTable({
   onVacate?: (seat: number) => void;
 }) {
   const turn = turnText(view);
+  const sceneRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const scroll = () => {
+      const label = sceneRef.current?.querySelector("[data-turn-label]");
+      if (!label || view.phase === "lobby") return;
+      const rect = label.getBoundingClientRect();
+      const visible = rect.top >= 8 && rect.bottom <= window.innerHeight - 8;
+      if (!visible) label.scrollIntoView({ block: "center", behavior: "smooth" });
+    };
+    scroll();
+    window.addEventListener("resize", scroll);
+    return () => window.removeEventListener("resize", scroll);
+  }, [turn, view.phase, view.actor, view.streetLabel]);
   return (
-    <div className="table-scene" data-testid="poker-table">
+    <div ref={sceneRef} className="table-scene" data-testid="poker-table">
       <div className="table-floor" />
       <div className="table-felt" />
       <div className="table-center">
@@ -51,12 +65,12 @@ export function PokerTable({
               {!seat.empty && seat.stack ? ` · ${seat.stack.toLocaleString("en-US")}` : ""}
               {seat.folded ? " · Folded" : seat.allin ? " · All-in" : ""}
             </p>
-            {acting ? <p className="table-flag">Turn</p> : null}
+            {seat.away ? <p className="table-flag away">Disconnected</p> : acting ? <p className="table-flag">Turn</p> : null}
           </>
         );
-        const className = `table-seat ${acting ? "turn" : ""} ${seat.folded ? "folded" : ""} ${seat.isYou ? "you" : ""} ${spot.slot === 0 ? "near" : ""}`;
+        const className = `table-seat ${acting ? "turn" : ""} ${seat.folded ? "folded" : ""} ${seat.away ? "away" : ""} ${seat.isYou ? "you" : ""} ${spot.slot === 0 ? "near" : ""}`;
         const style = { left: `${spot.x}%`, top: `${spot.y}%` };
-        const vacate = Boolean(onVacate && !seat.empty && !seat.human && !seat.isYou);
+        const vacate = Boolean(onVacate && !seat.isYou && (seat.away || (!seat.empty && !seat.human)));
         const claim = Boolean(seat.empty && onSit);
         if (claim || vacate) {
           const press = () => (claim ? onSit?.(index) : onVacate?.(index));
@@ -66,7 +80,8 @@ export function PokerTable({
               role="button"
               tabIndex={0}
               data-seat={index}
-              data-open={claim ? "true" : "ai"}
+              data-open={claim ? "true" : seat.away ? "away" : "ai"}
+              data-away={seat.away ? "true" : "false"}
               aria-label={claim ? `Sit in ${seat.name}` : `Free ${seat.name}'s chair`}
               className={className}
               style={style}
@@ -83,7 +98,7 @@ export function PokerTable({
           );
         }
         return (
-          <div key={index} data-seat={index} className={className} style={style}>
+          <div key={index} data-seat={index} data-away={seat.away ? "true" : "false"} className={className} style={style}>
             {body}
           </div>
         );
