@@ -435,8 +435,8 @@
 
 @media (max-width: 640px) {
   .table-scene {
-    height: min(28rem, calc(100dvh - 13.5rem));
-    min-height: 22rem;
+    height: min(18rem, calc(100dvh - 26rem));
+    min-height: 16rem;
   }
   .table-seat,
   .table-seat.near {

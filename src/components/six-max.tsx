@@ -442,7 +442,7 @@ export function SixMax({
       <div className="order-2 grid gap-4 lg:order-none lg:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="flex flex-col gap-3">
           <PokerTable view={soloView} />
-          <div ref={actionRef} className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 rounded-xl border border-black/50 bg-[#101010]/95 p-2 backdrop-blur">
+          <div ref={actionRef} className="z-20 rounded-xl border border-black/50 bg-[#101010]/95 p-2 backdrop-blur sm:sticky sm:bottom-[max(0.5rem,env(safe-area-inset-bottom))]">
             <div className="mb-2 flex justify-end">
               <SoundButton on={soundOn} onToggle={toggleSound} />
             </div>

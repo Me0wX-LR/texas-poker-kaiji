@@ -600,17 +600,6 @@ export function RoomTable({
           <div className="mt-2 flex flex-wrap gap-2">
             <Button
               type="button"
-              className="min-h-11 min-w-11 px-3"
-              variant={toolsOpen ? "default" : "outline"}
-              aria-label={unread > 0 ? `Table tools, ${unread} new messages` : "Table tools"}
-              aria-expanded={toolsOpen}
-              onClick={openTools}
-            >
-              <Settings className="size-5" />
-              <span className="ml-1">{unread > 0 ? `Chat ${unread}` : "Chat"}</span>
-            </Button>
-            <Button
-              type="button"
               className="min-h-11"
               variant="outline"
               onClick={() => {
@@ -706,8 +695,8 @@ export function RoomTable({
             }
             onVacate={code && role === "host" && (!hand || hand.phase === "done") ? sit : undefined}
           />
-          <div className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 rounded-xl border border-black bg-[#101010]/95 p-2 backdrop-blur">
-            <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="z-20 rounded-xl border border-black bg-[#101010]/95 p-2 backdrop-blur sm:sticky sm:bottom-[max(0.5rem,env(safe-area-inset-bottom))]">
+            <div className="mb-2 flex">
               <Button
                 type="button"
                 className="min-h-11 px-3"
