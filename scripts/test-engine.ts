@@ -594,6 +594,34 @@ check(
   turnText({ phase: "act", actor: 1, yourSeat: 0, seats: [{ name: "You", away: false } as SeatView, awaySeat] }) === "Bea disconnected",
 );
 
+const seatedHost = new TableHost("host", "Ada", false, new Rng(9));
+const randomAi = seatedHost.seatAi(1, roomBots, { pool: "random", botId: null });
+check("the host can seat a random AI", randomAi === null && seatedHost.occupants[1]?.kind === "ai");
+check("an occupied chair refuses another AI", seatedHost.seatAi(1, roomBots, { pool: "random", botId: null }) !== null);
+const namedBot = roomBots.find((bot) => bot.id !== seatedHost.occupants[1]?.botId);
+const namedSeat = namedBot ? seatedHost.seatAi(2, roomBots, { pool: "random", botId: namedBot.id }) : "missing";
+check("the host can seat a chosen AI", namedSeat === null && seatedHost.occupants[2]?.botId === namedBot?.id && seatedHost.occupants[2]?.name === namedBot?.name);
+check("the same AI cannot sit twice", namedBot ? seatedHost.seatAi(3, roomBots, { pool: "random", botId: namedBot.id }) !== null : false);
+check("Kaiji can sit in an open chair", seatedHost.seatAi(3, roomBots, { pool: "kaiji", botId: null }) === null && seatedHost.occupants[3]?.name === "Kaiji");
+check("Kaiji sits only once", seatedHost.seatAi(4, roomBots, { pool: "kaiji", botId: null }) !== null);
+const joined = seatedHost.claim("bea", "Bea", "pk", null);
+check("a friend can join an open chair beside the AIs", "seat" in joined && joined.seat === 4);
+const kickedNow = seatedHost.kick(4);
+check(
+  "the host can kick a friend",
+  !("error" in kickedNow) && kickedNow.pending === false && seatedHost.occupants[4]?.kind === "open",
+);
+check("a kicked friend cannot sit back down", "error" in seatedHost.claim("bea", "Bea", "pk", null));
+check("the host cannot be kicked", "error" in seatedHost.kick(0));
+const midHand = new TableHost("host", "Ada", true, new Rng(11));
+midHand.claim("bea", "Bea", "pk", 1);
+midHand.deal(roomBots);
+const midKick = midHand.kick(1);
+check(
+  "a kick during a hand waits until the cards are done",
+  !("error" in midKick) && midKick.pending === true && midHand.occupants[1]?.kicked === true,
+);
+
 console.log(`match pace ${((HANDS_PER_MATCH / dt) * 1000).toFixed(0)} hands/sec`);
 if (failed) {
   console.error(`${failed} failed`);

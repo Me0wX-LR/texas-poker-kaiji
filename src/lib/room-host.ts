@@ -2,7 +2,7 @@ import { INITIAL_ELO } from "./constants";
 import { HandMachine, positionName, type Decision } from "./hand";
 import { kaijiDecision } from "./kaiji";
 import { decideBot, type Bot } from "./policy";
-import { selectPracticeBot } from "./controller";
+import { selectPracticeBot, type SeatRequest } from "./controller";
 import type { Rng } from "./rng";
 import { cleanPlayerName, streetLabel, visibleHole, type TableView } from "./table-view";
 
@@ -14,9 +14,12 @@ export interface Occupant {
   playerId: string | null;
   publicKey: string | null;
   bot: Bot | null;
+  /** Field id, kept even when a chart copy does not store the bot. */
+  botId: string | null;
   detail: string;
   connected: boolean;
   lastSeen: number;
+  kicked: boolean;
 }
 
 function copyBot(bot: Bot): Bot {
@@ -39,9 +42,11 @@ function openSeat(): Occupant {
     playerId: null,
     publicKey: null,
     bot: null,
+    botId: null,
     detail: "Empty chair",
     connected: true,
     lastSeen: 0,
+    kicked: false,
   };
 }
 
@@ -52,6 +57,7 @@ export class TableHost {
   readonly nets = [0, 0, 0, 0, 0, 0];
   handNo = 0;
   private accounted = false;
+  private readonly banned = new Set<string>();
 
   constructor(
     readonly hostId: string,
@@ -66,9 +72,11 @@ export class TableHost {
       playerId: hostId,
       publicKey: null,
       bot: null,
+      botId: null,
       detail: "Host",
       connected: true,
       lastSeen: Date.now(),
+      kicked: false,
     };
   }
 
@@ -81,9 +89,11 @@ export class TableHost {
   }
 
   claim(clientId: string, name: string, publicKey: string, seat: number | null): { seat: number; rejoined?: boolean } | { error: string } {
+    if (this.banned.has(clientId)) return { error: "The host kicked you." };
     const clean = cleanPlayerName(name);
     const sitting = this.occupants.findIndex((item) => item.playerId === clientId);
     if (sitting >= 0) {
+      if (this.occupants[sitting].kicked) return { error: "The host kicked you." };
       const rejoined = !this.occupants[sitting].connected;
       this.occupants[sitting].name = clean;
       this.occupants[sitting].publicKey = publicKey;
@@ -102,6 +112,7 @@ export class TableHost {
     );
     if (sameName >= 0) {
       const reserved = this.occupants[sameName];
+      if (reserved.kicked) return { error: "That chair is closing." };
       if (!reserved.connected) {
         reserved.playerId = clientId;
         reserved.publicKey = publicKey;
@@ -124,9 +135,11 @@ export class TableHost {
       playerId: clientId,
       publicKey,
       bot: null,
+      botId: null,
       detail: "Friend",
       connected: true,
       lastSeen: Date.now(),
+      kicked: false,
     };
     return { seat: index };
   }
@@ -178,29 +191,110 @@ export class TableHost {
     if (seat <= 0 || seat > 5) return;
     const chair = this.occupants[seat];
     if (!chair) return;
-    if (chair.kind === "ai" || (chair.kind === "human" && !chair.connected)) this.occupants[seat] = openSeat();
+    if (chair.kind === "ai" || (chair.kind === "human" && !chair.connected && !chair.kicked)) this.occupants[seat] = openSeat();
+  }
+
+  /** Remove a friend now, or when the current hand ends. */
+  kick(seat: number): { playerId: string; name: string; pending: boolean } | { error: string } {
+    if (seat <= 0 || seat > 5) return { error: "The host stays." };
+    const chair = this.occupants[seat];
+    if (!chair || chair.kind !== "human" || !chair.playerId) return { error: "That chair is not a player." };
+    const playerId = chair.playerId;
+    const name = chair.name;
+    if (this.hand && this.hand.phase !== "done") {
+      chair.kicked = true;
+      if (this.hand.phase === "act" && this.hand.actor === seat) this.stepKicked();
+      const pending = this.occupants[seat]?.playerId === playerId;
+      return { playerId, name, pending };
+    }
+    this.banned.add(playerId);
+    this.occupants[seat] = openSeat();
+    return { playerId, name, pending: false };
+  }
+
+  /** Fold a kicked player when the action reaches them. */
+  stepKicked(): boolean {
+    const hand = this.hand;
+    if (!hand || hand.phase !== "act") return false;
+    const seat = this.occupants[hand.actor];
+    if (!seat?.kicked) return false;
+    hand.act(hand.actor, { act: "fold" });
+    this.finishIfDone();
+    return true;
+  }
+
+  /** Put one AI in an open chair. Empty chairs still fill at random when the host deals. */
+  seatAi(seat: number, bots: Bot[], request: SeatRequest): string | null {
+    if (this.hand && this.hand.phase !== "done") return "Wait for the next hand.";
+    if (seat <= 0 || seat > 5) return "The host keeps that chair.";
+    if (this.occupants[seat]?.kind !== "open") return "That chair is taken.";
+    const taken = new Set<string>();
+    for (const item of this.occupants) if (item.botId) taken.add(item.botId);
+    const kaijiSat = this.occupants.some((item) => item.name === "Kaiji" && item.detail === "Static chart");
+    if (request.botId) {
+      if (taken.has(request.botId)) return "That player is already seated.";
+      const bot = bots.find((item) => item.id === request.botId);
+      if (!bot) return "That player is not in this field.";
+      this.placeAi(seat, bot);
+      return null;
+    }
+    if (request.pool === "kaiji") {
+      if (kaijiSat) return "Kaiji can only sit once.";
+      this.placeAi(seat, "kaiji");
+      return null;
+    }
+    const pick = selectPracticeBot(bots, request.pool, this.rng.next(), taken);
+    if (!pick) return "Nobody left in that group is free to sit.";
+    if (pick === "kaiji") {
+      if (kaijiSat) return "Kaiji can only sit once.";
+      this.placeAi(seat, "kaiji");
+      return null;
+    }
+    this.placeAi(seat, pick);
+    return null;
+  }
+
+  private placeAi(seat: number, pick: Bot | "kaiji"): void {
+    if (pick === "kaiji") {
+      this.occupants[seat] = {
+        name: "Kaiji",
+        kind: "ai",
+        playerId: null,
+        publicKey: null,
+        bot: null,
+        botId: null,
+        detail: "Static chart",
+        connected: true,
+        lastSeen: Date.now(),
+        kicked: false,
+      };
+      return;
+    }
+    const usesKaiji = pick.playsKaiji;
+    this.occupants[seat] = {
+      name: pick.name,
+      kind: "ai",
+      playerId: null,
+      publicKey: null,
+      bot: usesKaiji ? null : copyBot(pick),
+      botId: pick.id,
+      detail: usesKaiji ? "Kaiji chart" : pick.params.personality,
+      connected: true,
+      lastSeen: Date.now(),
+      kicked: false,
+    };
   }
 
   deal(bots: Bot[]): string | null {
     if (this.hand && this.hand.phase !== "done") return "A hand is already going.";
     const taken = new Set<string>();
-    for (const seat of this.occupants) if (seat.bot) taken.add(seat.bot.id);
+    for (const seat of this.occupants) if (seat.botId) taken.add(seat.botId);
     for (let i = 0; i < 6; i++) {
       if (this.occupants[i].kind !== "open") continue;
       const pick = selectPracticeBot(bots, "random", this.rng.next(), taken);
       if (!pick || pick === "kaiji") return "The field is still loading.";
       taken.add(pick.id);
-      const usesKaiji = pick.playsKaiji;
-      this.occupants[i] = {
-        name: pick.name,
-        kind: "ai",
-        playerId: null,
-        publicKey: null,
-        bot: usesKaiji ? null : copyBot(pick),
-        detail: usesKaiji ? "Kaiji chart" : pick.params.personality,
-        connected: true,
-        lastSeen: Date.now(),
-      };
+      this.placeAi(i, pick);
     }
     if (this.hand?.phase === "done") this.button = (this.button + 1) % 6;
     this.accounted = false;
@@ -214,6 +308,7 @@ export class TableHost {
     if (!hand || hand.phase !== "act") return "No action is open.";
     const seat = this.occupants[hand.actor];
     if (!seat || seat.playerId !== clientId) return "It is not your turn.";
+    if (seat.kicked) return "The host kicked you.";
     seat.connected = true;
     seat.lastSeen = Date.now();
     const act = decision?.act;
@@ -256,6 +351,12 @@ export class TableHost {
     if (!hand || hand.phase !== "done" || this.accounted) return;
     this.accounted = true;
     for (let i = 0; i < 6; i++) this.nets[i] += hand.stack[i] - 10000;
+    for (let i = 1; i < 6; i++) {
+      const seat = this.occupants[i];
+      if (!seat.kicked || !seat.playerId) continue;
+      this.banned.add(seat.playerId);
+      this.occupants[i] = openSeat();
+    }
   }
 
   position(seat: number): string {

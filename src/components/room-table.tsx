@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { PokerTable } from "@/components/poker-table";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { formatChips } from "@/lib/constants";
+import { TIER_LABEL, formatChips } from "@/lib/constants";
+import type { PracticePool, SeatRequest } from "@/lib/controller";
+import { PRACTICE_GROUPS } from "@/lib/field";
 import { positionName, type Decision } from "@/lib/hand";
 import type { Bot } from "@/lib/policy";
 import { decryptHoles, encryptHoles, makeSeatKeys, type SeatKeys } from "@/lib/room-crypto";
@@ -79,6 +81,9 @@ export function RoomTable({
   const [ownCards, setOwnCards] = useState<number[] | null>(null);
   const [sizing, setSizing] = useState<number[] | null>(null);
   const [copied, setCopied] = useState(false);
+  const [kicked, setKicked] = useState(false);
+  const [picking, setPicking] = useState<number | null>(null);
+  const [pickQuery, setPickQuery] = useState("");
   const clientId = useRef(rememberPlayerId());
   const keys = useRef<SeatKeys | null>(null);
   const bus = useRef<RoomBus | null>(null);
@@ -120,7 +125,7 @@ export function RoomTable({
   }, [role]);
 
   useEffect(() => {
-    if (role !== "guest" || !code) return;
+    if (role !== "guest" || !code || kicked) return;
     if (wire?.seats.some((seat) => seat.playerId === clientId.current && seat.connected !== false)) return;
     const timer = window.setInterval(() => {
       const publicKey = keys.current?.publicKey;
@@ -133,7 +138,7 @@ export function RoomTable({
       });
     }, 1200);
     return () => window.clearInterval(timer);
-  }, [role, code, wire, name]);
+  }, [role, code, wire, name, kicked]);
 
   const local = host.current;
   const hand = local?.hand ?? null;
@@ -153,6 +158,12 @@ export function RoomTable({
           audio.current?.street();
           void publishRef.current();
           refresh();
+        } else if (live.phase === "act" && table.occupants[live.actor]?.kicked) {
+          if (table.stepKicked()) {
+            audio.current?.fold();
+            void publishRef.current();
+            refresh();
+          }
         } else if (live.phase === "act" && table.occupants[live.actor]?.kind === "ai") {
           if (table.aiStep()) {
             const acted = table.hand?.lastAction ?? "";
@@ -225,8 +236,15 @@ export function RoomTable({
         const body = event.body as { name?: string; publicKey?: string; seat?: number | null };
         if (!body?.publicKey) return;
         const result = table.claim(event.clientId, body.name ?? "Player", body.publicKey, body.seat ?? null);
-        if ("error" in result) setNotice(result.error);
-        else setNotice(`${cleanPlayerName(body.name ?? "Player")} ${result.rejoined ? "sat back down" : "sat down"}.`);
+        if ("error" in result) {
+          setNotice(result.error);
+          bus.current?.publish({
+            id: nextId(),
+            type: "refuse",
+            clientId: clientId.current,
+            body: { playerId: event.clientId, error: result.error },
+          });
+        } else setNotice(`${cleanPlayerName(body.name ?? "Player")} ${result.rejoined ? "sat back down" : "sat down"}.`);
         void publish();
         refresh();
       } else if (event.type === "drop") {
@@ -252,6 +270,22 @@ export function RoomTable({
         else audio.current?.chips();
         void publish();
         refresh();
+      }
+      return;
+    }
+    if (event.type === "kick") {
+      const body = event.body as { playerId?: string; pending?: boolean };
+      if (body?.playerId === clientId.current) {
+        setKicked(true);
+        setError(body.pending ? "The host kicked you. You leave when this hand ends." : "The host kicked you.");
+      }
+      return;
+    }
+    if (event.type === "refuse") {
+      const body = event.body as { playerId?: string; error?: string };
+      if (body?.playerId === clientId.current && body.error) {
+        setError(body.error);
+        if (body.error === "The host kicked you.") setKicked(true);
       }
       return;
     }
@@ -370,6 +404,7 @@ export function RoomTable({
   function sit(seat: number) {
     if (role === "host") {
       host.current?.vacate(seat);
+      setPicking(null);
       void publish();
       refresh();
       return;
@@ -380,6 +415,39 @@ export function RoomTable({
       clientId: clientId.current,
       body: { name: cleanPlayerName(name), publicKey: keys.current?.publicKey, seat },
     });
+  }
+
+  function kickSeat(seat: number) {
+    const table = host.current;
+    if (!table) return;
+    const result = table.kick(seat);
+    if ("error" in result) {
+      setNotice(result.error);
+      return;
+    }
+    setNotice(result.pending ? `${result.name} leaves when this hand ends.` : `${result.name} was kicked.`);
+    bus.current?.publish({
+      id: nextId(),
+      type: "kick",
+      clientId: clientId.current,
+      body: { playerId: result.playerId, pending: result.pending },
+    });
+    void publish();
+    refresh();
+  }
+
+  function fillSeat(seat: number, request: SeatRequest) {
+    const table = host.current;
+    if (!table) return;
+    const problem = table.seatAi(seat, botsRef.current(), request);
+    if (problem) setNotice(problem);
+    else {
+      setNotice(`${table.occupants[seat]?.name ?? "An AI"} sat down.`);
+      setPicking(null);
+      setPickQuery("");
+      void publish();
+      refresh();
+    }
   }
 
   const guestView = wire ? guestTable(wire, clientId.current, ownCards) : null;
@@ -421,10 +489,10 @@ export function RoomTable({
             {role === "host" ? "Open the table" : savedName && cleanPlayerName(name || savedName) === savedName ? "Sit back down" : "Sit down"}
           </Button>
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-            Share the code with the people at the table. Empty chairs become AIs when the host deals. The host deals the cards. Hole cards are encrypted to each seat. This table does not move the ladder.
+            Share the code with the people at the table. Open chairs stay open so a friend can sit. The host can kick a player, or seat a random AI or a chosen one. Empty chairs still fill at random when the host deals. The host deals the cards. Hole cards are encrypted to each seat. This table does not move the ladder.
             {role === "guest"
               ? " If you disconnect, your chair stays. Sit back down with the same name, even in the middle of a hand. The host's chair does not."
-              : " A friend who disconnects keeps their chair until they sit back down with the same name. You can free that chair between hands."}
+              : " A friend who disconnects keeps their chair until they sit back down with the same name."}
           </p>
         </div>
       ) : (
@@ -458,9 +526,37 @@ export function RoomTable({
       )}
       {view ? (
         <>
+          {role === "host" ? (
+            <HostChairs
+              seats={view.seats}
+              between={!hand || hand.phase === "done"}
+              picking={picking}
+              query={pickQuery}
+              bots={bots()}
+              taken={new Set(local?.occupants.flatMap((seat) => (seat.botId ? [seat.botId] : [])) ?? [])}
+              onPickSeat={(seat) => {
+                setPicking(seat);
+                setPickQuery("");
+              }}
+              onQuery={setPickQuery}
+              onRandom={(seat) => fillSeat(seat, { pool: "random", botId: null })}
+              onChoose={(seat, request) => fillSeat(seat, request)}
+              onKick={kickSeat}
+              onRemove={sit}
+            />
+          ) : null}
           <PokerTable
             view={view}
-            onSit={code && role === "guest" ? sit : undefined}
+            onSit={
+              code && role === "guest"
+                ? sit
+                : code && role === "host" && (!hand || hand.phase === "done")
+                  ? (seat) => {
+                      setPicking(seat);
+                      setPickQuery("");
+                    }
+                  : undefined
+            }
             onVacate={code && role === "host" && (!hand || hand.phase === "done") ? sit : undefined}
           />
           <div className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 rounded-xl border border-black/50 bg-[#08281e]/95 p-2 backdrop-blur">
@@ -573,6 +669,159 @@ async function wireFrom(table: TableHost, mine: SeatKeys): Promise<WireState> {
     }
   }
   return { ...publicState, hostPub: mine.publicKey, holes, revealed, legal };
+}
+
+function HostChairs({
+  seats,
+  between,
+  picking,
+  query,
+  bots,
+  taken,
+  onPickSeat,
+  onQuery,
+  onRandom,
+  onChoose,
+  onKick,
+  onRemove,
+}: {
+  seats: TableView["seats"];
+  between: boolean;
+  picking: number | null;
+  query: string;
+  bots: Bot[];
+  taken: Set<string>;
+  onPickSeat: (seat: number) => void;
+  onQuery: (query: string) => void;
+  onRandom: (seat: number) => void;
+  onChoose: (seat: number, request: SeatRequest) => void;
+  onKick: (seat: number) => void;
+  onRemove: (seat: number) => void;
+}) {
+  const q = query.trim().toLowerCase();
+  const hits = q
+    ? bots.filter((bot) => !taken.has(bot.id) && bot.name.toLowerCase().includes(q)).slice(0, 6)
+    : [];
+  return (
+    <div className="rounded-xl border bg-card p-3" data-testid="host-seats">
+      <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Chairs</p>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+        An open chair can take a friend with the code, a random AI, or one you pick. Kick removes a player. Kaiji can sit once.
+      </p>
+      <ul className="mt-2 flex flex-col gap-2">
+        {seats.map((seat, index) => {
+          if (index === 0) return null;
+          return (
+            <li key={index} className="rounded-lg border border-border/80 p-2" data-chair={index}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="min-w-0 truncate text-sm">
+                  <span className="text-muted-foreground">Chair {index} · </span>
+                  {seat.empty ? "Open" : seat.name}
+                  {seat.away ? " · Disconnected" : ""}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {seat.empty && between ? (
+                    <>
+                      <Button type="button" className="min-h-11" variant="outline" onClick={() => onRandom(index)}>
+                        Random AI
+                      </Button>
+                      <Button type="button" className="min-h-11" variant={picking === index ? "default" : "outline"} onClick={() => onPickSeat(picking === index ? -1 : index)}>
+                        {picking === index ? "Close" : "Choose"}
+                      </Button>
+                    </>
+                  ) : null}
+                  {seat.human && !seat.isYou ? (
+                    <Button type="button" className="min-h-11" variant="outline" onClick={() => onKick(index)}>
+                      Kick
+                    </Button>
+                  ) : null}
+                  {!seat.empty && !seat.human && between ? (
+                    <Button type="button" className="min-h-11" variant="outline" onClick={() => onRemove(index)}>
+                      Remove
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+              {picking === index && seat.empty && between ? (
+                <AiMenu
+                  hits={hits}
+                  query={query}
+                  onQuery={onQuery}
+                  onPool={(pool) => onChoose(index, { pool, botId: null })}
+                  onName={(botId) => onChoose(index, { pool: "random", botId })}
+                />
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function AiMenu({
+  hits,
+  query,
+  onQuery,
+  onPool,
+  onName,
+}: {
+  hits: Bot[];
+  query: string;
+  onQuery: (query: string) => void;
+  onPool: (pool: PracticePool) => void;
+  onName: (botId: string) => void;
+}) {
+  return (
+    <div className="mt-2">
+      <div role="listbox" className="max-h-52 overflow-auto rounded-lg border border-[#4a382c] bg-[#221812] p-1">
+        <PoolChoice label="Random player" onPick={() => onPool("random")} />
+        <PoolChoice label="Kaiji" onPick={() => onPool("kaiji")} />
+        <PoolChoice label="Kaiji chart copies" onPick={() => onPool("kaiji-chart")} />
+        {PRACTICE_GROUPS.map((group) => (
+          <div key={group.tier}>
+            <p className="px-2 pt-2 text-[10px] uppercase tracking-[0.16em] text-[#c4b39a]">{TIER_LABEL[group.tier]}</p>
+            <PoolChoice label={`Any ${TIER_LABEL[group.tier]}`} onPick={() => onPool(group.tier)} />
+            {group.personalities.map((name) => (
+              <PoolChoice key={name} label={name} onPick={() => onPool(`style:${name}`)} />
+            ))}
+          </div>
+        ))}
+      </div>
+      <input
+        value={query}
+        placeholder="Or type a name"
+        aria-label="AI name"
+        className="mt-2 min-h-11 w-full rounded-lg border border-input bg-[#221812] px-2.5 text-base text-[#f3e6d0] outline-none placeholder:text-[#c4b39a]"
+        onChange={(event) => onQuery(event.target.value)}
+      />
+      {hits.length > 0 ? (
+        <div className="mt-1 max-h-40 overflow-auto rounded-lg border border-[#4a382c] bg-[#221812]">
+          {hits.map((hit) => (
+            <button
+              key={hit.id}
+              type="button"
+              className="flex min-h-11 w-full items-center justify-between gap-2 px-2 text-left text-sm text-[#f3e6d0]"
+              onClick={() => onName(hit.id)}
+            >
+              <span className="truncate">{hit.name}</span>
+              <span className="shrink-0 text-[#c4b39a]">{hit.params.personality}</span>
+            </button>
+          ))}
+        </div>
+      ) : query.trim() ? (
+        <p className="mt-1 text-xs text-[#c4b39a]">No player matches.</p>
+      ) : null}
+    </div>
+  );
+}
+
+function PoolChoice({ label, onPick }: { label: string; onPick: () => void }) {
+  return (
+    <button type="button" role="option" className="flex min-h-11 w-full items-center rounded-md px-2 text-left text-base text-[#f3e6d0]" onClick={onPick}>
+      {label}
+    </button>
+  );
 }
 
 function rememberPlayerId(): string {
