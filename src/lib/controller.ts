@@ -17,7 +17,7 @@ import { eloUpdates, placementScores } from "./elo";
 import { Field, applyKaijiPopulation, generateField, teamMeans, teamName, teamPools, tierMeans, tierPools, validateField } from "./field";
 import { HandMachine, HandResult, playHand } from "./hand";
 import { kaijiDecision } from "./kaiji";
-import { SeatCard, drawSeats, playHeadsUpMatch } from "./match";
+import { SeatCard, drawRound, playHeadsUpMatch, playTableHand, rateTable } from "./match";
 import { decideBot, learnFromHand, type Bot } from "./policy";
 import { Rng, hashString } from "./rng";
 import { HistoryPoint, SaveData, clearSave, loadSave, writeSave } from "./storage";
@@ -249,6 +249,8 @@ export class SimController {
   private booted = false;
   private restored = false;
   private live: { index: number; handsDone: number; nets: number[]; seats: SeatCard[] } | null = null;
+  /** AI tables seated with Kaiji's table. They play the same 240 hands and are rated with it. */
+  private sides: { seats: SeatCard[]; nets: number[] }[] = [];
   private hand: HandMachine | null = null;
   private preview: HandResult | null = null;
   private previewSeats: SeatCard[] | null = null;
@@ -605,6 +607,7 @@ export class SimController {
     this.locked = false;
     this.lockReason = null;
     this.live = null;
+    this.sides = [];
     this.hand = null;
     this.preview = null;
     this.previewSeats = null;
@@ -800,9 +803,14 @@ export class SimController {
       this.lock("hand");
       return false;
     }
-    const seats = drawSeats(this.field!, this.kaijiElo, this.rng);
+    const tables = drawRound(this.field!, this.kaijiElo, this.rng);
+    const seats = tables[0];
     this.previewSeats = seats;
-    this.live = { index: this.matchesCompleted, handsDone: 0, nets: [0, 0, 0, 0, 0, 0], seats };
+    this.sides = tables.slice(1).map((table) => ({
+      seats: table,
+      nets: Array.from({ length: table.length }, () => 0),
+    }));
+    this.live = { index: this.matchesCompleted, handsDone: 0, nets: Array.from({ length: seats.length }, () => 0), seats };
     return true;
   }
 
@@ -832,6 +840,7 @@ export class SimController {
     this.displayNets = live.nets.slice();
     this.handsPlayed++;
     live.handsDone++;
+    this.advanceSides();
     if (live.handsDone >= HANDS_PER_MATCH) {
       this.finishMatch();
       return;
@@ -851,29 +860,42 @@ export class SimController {
     };
   }
 
+  private advanceSides(): void {
+    const live = this.live;
+    if (!live) return;
+    const handIndex = live.handsDone - 1;
+    for (const side of this.sides) {
+      const nets = playTableHand({
+        seats: side.seats,
+        handIndex,
+        blinds: this.blinds,
+        rng: this.rng,
+        learn: true,
+      });
+      for (let i = 0; i < nets.length; i++) {
+        side.nets[i] += nets[i];
+        const bot = side.seats[i].bot;
+        if (!bot) continue;
+        this.tierChips[bot.tier] += nets[i];
+        const team = side.seats[i].team;
+        if (team >= 0 && team < this.teamChips.length) this.teamChips[team] += nets[i];
+      }
+    }
+  }
+
   private finishMatch(): void {
     const live = this.live;
     if (!live || !this.field) return;
-    const ratings = live.seats.map((seat) => seat.elo);
-    const next = eloUpdates(ratings, placementScores(live.nets));
-    let kaijiPlayed = false;
-    for (let i = 0; i < live.seats.length; i++) {
-      const bot = live.seats[i].bot;
-      if (!bot) {
-        this.kaijiElo = next[i];
-        kaijiPlayed = true;
-      } else {
-        bot.elo = next[i];
-        bot.matches += 1;
-        live.seats[i].elo = next[i];
-      }
-    }
-    if (kaijiPlayed) {
+    const nextKaiji = rateTable(live.seats, live.nets);
+    if (nextKaiji !== null) {
+      this.kaijiElo = nextKaiji;
       const kaijiSeat = live.seats.findIndex((seat) => seat.bot === null);
       const best = Math.max(...live.nets);
       if (kaijiSeat >= 0 && live.nets[kaijiSeat] === best) this.kaijiWins++;
       this.kaijiMatches++;
     }
+    for (const side of this.sides) rateTable(side.seats, side.nets);
+    this.sides = [];
     this.matchesCompleted++;
     this.history.push(this.historyPoint());
     this.live = null;

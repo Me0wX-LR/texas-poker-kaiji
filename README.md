@@ -17,7 +17,7 @@ Open [http://127.0.0.1:47221](http://127.0.0.1:47221).
 
 ## Play
 
-- **The table** deals six-handed matches. Speed runs from 1× (every action) through 1000× (batched hands, chart still updates).
+- **The table** deals Kaiji's six-handed match. The rest of the room is seated at the same time, AI against AI, for the same 240 hands. When Kaiji has played 1,008 matches, every player has too. Speed runs from 1× (every action) through 1000× (batched hands, chart still updates).
 - **Blind bet required** posts 50/100. Off, nobody posts; an all-check hand moves 0 chips. The minimum opening bet stays 100.
 - **Heads-up** rates you and the player across from you after 240 hands, with the same K=32 formula as the six-max table. Match randomly, sit Kaiji, or choose a style or personality and draw one player of that type. Next hand stays with that player. New opponent draws again. A shorter sit is not rated. While that tab is open, other players play their own heads-up matches and the ladder on the screen moves with them. A locked run does not move. Sound on starts a synthesized pulse and hits for cards, chips, an all-in, and the result. The browser only starts audio after you tap.
 - **Experiment** states the claim and plots Elo and chips from the run. The verdict is computed. A deadline locks Kaiji's final Elo.
@@ -36,7 +36,7 @@ Everyone in this sim starts at 1,500. Place score for six players is `(6 − pla
 
 Odd chips in a split go to the first winner left of the button. A short all-in reopens betting. The Elo update is zero-sum at the table. Kaiji is one rating, and he is rated every match. Each tier line on the chart is the average rating of players of that style who have sat, not 1,500 plus the sum of all of them. That sum is shown separately as the group pile. A pile climbs faster than Kaiji because hundreds of small results are added together. A dynamic bot reads his own rating, not the pile.
 
-Kaiji is one player and only plays the fixed chart. Each match draws him plus five other players from the field, and each of those seats keeps that player for all 240 hands.
+Kaiji is one player and only plays the fixed chart. Each match seats him and every other player. His table keeps the same five opponents for all 240 hands. The other tables are only AIs, reshuffled every match. A player count that is not a multiple of six still seats everyone: a leftover seat becomes a short table, and a single leftover becomes a five-handed table plus a heads-up.
 
 Kaiji preflop: all-in with any pocket pair or AK, AQ, AJ, AT (suited or offsuit); otherwise check if free, else fold. Postflop: all-in with top pair or better (top pair and overpair must use a hole card; two pair or better always shoves); otherwise check if free, else fold.
 

@@ -4,7 +4,7 @@ import { applyKaijiPopulation, botSignature, generateField, teamName, teamPools,
 import { selectPracticeBot } from "../src/lib/controller";
 import { HandMachine, playHand, type Decision } from "../src/lib/hand";
 import { kaijiDecision, kaijiPostflopShove, kaijiPreflopShove } from "../src/lib/kaiji";
-import { playHeadsUpMatch, playRatedMatch } from "../src/lib/match";
+import { drawRound, playHeadsUpMatch, playRatedMatch, tableSizes } from "../src/lib/match";
 import { Rng } from "../src/lib/rng";
 import { DEFAULT_MATCH_DEADLINE, HANDS_PER_MATCH, INITIAL_ELO } from "../src/lib/constants";
 
@@ -173,6 +173,34 @@ try {
   refused = true;
 }
 check("1201 bots is refused", refused);
+const sixty = tableSizes(61);
+check(
+  "61 players all sit and Kaiji's table stays six-handed",
+  sixty.reduce((sum, size) => sum + size, 0) === 61 && sixty.every((size) => size >= 2 && size <= 6) && sixty[0] === 6,
+);
+const roomField = generateField("room-60", 7, 60);
+const roomTables = drawRound(roomField, INITIAL_ELO, new Rng(3));
+const roomIds = roomTables.flatMap((table) => table.map((seat) => seat.bot?.id ?? "kaiji"));
+check(
+  "a 60-bot round seats Kaiji and every bot once",
+  roomIds.length === 61 && new Set(roomIds).size === 61 && roomTables[0].some((seat) => seat.bot === null),
+);
+const playedRoom = generateField("room-50", 7, 50);
+const filled = playRatedMatch({
+  field: playedRoom,
+  matchIndex: 0,
+  kaijiElo: INITIAL_ELO,
+  blinds: true,
+  rng: new Rng(5),
+  fillRoom: true,
+});
+check("filled room match is rated", filled.rated && filled.hands === HANDS_PER_MATCH);
+check(
+  "one round gives every bot one match",
+  playedRoom.bots.every((bot) => bot.matches === 1),
+);
+const roomDrift = playedRoom.bots.reduce((sum, bot) => sum + (bot.elo - INITIAL_ELO), filled.nextKaijiElo - INITIAL_ELO);
+check("a full room is zero-sum", Math.abs(roomDrift) < 1e-3, String(roomDrift));
 const ids = new Set(field.bots.map((bot) => bot.id));
 const sigs = new Set(field.bots.map(botSignature));
 check("stable unique ids", ids.size === 1200);
