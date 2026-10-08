@@ -162,14 +162,14 @@ export function KaijiApp() {
           <Settings className="size-5" />
         </Button>
         <div className="ml-auto flex gap-2">
-          <div className="min-w-[5.5rem] rounded-xl border bg-card px-3 py-2 text-right">
+          <div className="min-w-[5.5rem] rounded-xl border bg-card px-3 py-2 text-right max-sm:min-w-[4.5rem] max-sm:px-2 max-sm:py-1">
             <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Win rate</p>
-            <p className="font-display text-lg text-[#e2b657]">{winRateLabel(snap)}</p>
-            <p className="text-[10px] text-muted-foreground">{winRateDetail(snap)}</p>
+            <p className="font-display text-base text-[#e2b657] sm:text-lg">{winRateLabel(snap)}</p>
+            <p className="hidden text-[10px] text-muted-foreground sm:block">{winRateDetail(snap)}</p>
           </div>
-          <div className="min-w-[5.5rem] rounded-xl border bg-card px-3 py-2 text-right">
+          <div className="min-w-[5.5rem] rounded-xl border bg-card px-3 py-2 text-right max-sm:min-w-[4.5rem] max-sm:px-2 max-sm:py-1">
             <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{snap.locked ? "Locked Elo" : "Kaiji Elo"}</p>
-            <p className="font-display text-lg text-[#ff5d5d]">{formatElo(snap.kaijiElo)}</p>
+            <p className="font-display text-base text-[#ff5d5d] sm:text-lg">{formatElo(snap.kaijiElo)}</p>
           </div>
         </div>
       </header>
@@ -301,14 +301,14 @@ export function KaijiApp() {
           if (next === "table") setSimOpen(true);
         }}
       >
-        <TabsList className="flex h-auto w-full flex-wrap">
-          <TabsTrigger className="min-h-11 px-3" value="table">The table</TabsTrigger>
-          <TabsTrigger className="min-h-11 px-3" value="ladder">Ladder</TabsTrigger>
-          <TabsTrigger className="min-h-11 px-3" value="tiers">Tier list</TabsTrigger>
-          <TabsTrigger className="min-h-11 px-3" value="experiment">Experiment</TabsTrigger>
-          <TabsTrigger className="min-h-11 px-3" value="heads">Heads-up</TabsTrigger>
-          <TabsTrigger className="min-h-11 px-3" value="six">Six-max</TabsTrigger>
-          <TabsTrigger className="min-h-11 px-3" value="rules">Rules</TabsTrigger>
+        <TabsList className="flex h-auto w-full flex-wrap max-sm:h-11 max-sm:flex-nowrap max-sm:justify-start max-sm:overflow-x-auto">
+          <TabsTrigger className="min-h-11 px-3 max-sm:flex-none max-sm:shrink-0" value="table">The table</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3 max-sm:flex-none max-sm:shrink-0" value="ladder">Ladder</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3 max-sm:flex-none max-sm:shrink-0" value="tiers">Tier list</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3 max-sm:flex-none max-sm:shrink-0" value="experiment">Experiment</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3 max-sm:flex-none max-sm:shrink-0" value="heads">Heads-up</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3 max-sm:flex-none max-sm:shrink-0" value="six">Six-max</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3 max-sm:flex-none max-sm:shrink-0" value="rules">Rules</TabsTrigger>
         </TabsList>
 
         <TabsContent value="table" className="mt-3">

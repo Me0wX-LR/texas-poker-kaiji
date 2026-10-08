@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { PlayingCard } from "@/components/cards";
+import { MusicSelect } from "@/components/music-select";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { HANDS_PER_MATCH, TIER_LABEL, asset, formatChips, formatElo } from "@/lib/constants";
@@ -12,6 +13,7 @@ import { decideBot } from "@/lib/policy";
 import type { FieldDuel, LadderRow, PracticePool, PracticeRate, PracticeSeat } from "@/lib/controller";
 import { Rng, hashString } from "@/lib/rng";
 import { TableAudio, handResult } from "@/lib/table-audio";
+import { rememberMusic, savedMusicId } from "@/lib/table-music";
 
 const STREETS = ["Preflop", "Flop", "Turn", "River"];
 
@@ -45,6 +47,7 @@ export function HeadsUp({
   const [error, setError] = useState<string | null>(null);
   const [sizing, setSizing] = useState<number[] | null>(null);
   const [soundOn, setSoundOn] = useState(true);
+  const [track, setTrack] = useState("felt-pulse");
   const audio = useRef<TableAudio | null>(null);
   const heardTurn = useRef(false);
   const rootRef = useRef<HTMLElement | null>(null);
@@ -63,6 +66,9 @@ export function HeadsUp({
   useEffect(() => {
     const table = audio.current ?? new TableAudio();
     audio.current = table;
+    const id = savedMusicId();
+    setTrack(id);
+    table.setTrack(id);
     setSoundOn(!table.muted);
     const node = rootRef.current;
     const observer = node
@@ -239,9 +245,17 @@ function voice(actName: Act, current: HandMachine) {
     if (next && handRef.current) audio.current?.startMusic();
   }
 
+  function chooseMusic(id: string) {
+    const next = rememberMusic(id);
+    setTrack(next);
+    audio.current?.setTrack(next);
+    audio.current?.startMusic();
+  }
+
   return (
     <section ref={rootRef} className="flex flex-col gap-4">
       <MatchPicker pool={pool} setPool={setPool} opponent={opponent} />
+      <div className="hidden sm:block">
       <LiveLadder
         ladder={ladder}
         duels={fieldDuels}
@@ -249,6 +263,7 @@ function voice(actName: Act, current: HandMachine) {
         yourElo={yourElo}
         opponentId={opponent?.botId ?? (opponent?.name === "Kaiji" ? "kaiji" : null)}
       />
+      </div>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <div className="felt relative rounded-[2rem] p-4 sm:p-6">
         <p className="pointer-events-none absolute inset-x-0 top-6 text-center font-display text-xs tracking-[0.4em] text-[#e2b657]/30">
@@ -267,13 +282,17 @@ function voice(actName: Act, current: HandMachine) {
               <h2 className="font-display text-sm text-[#f6efe2]">
                 {opponent ? `${opponent.name} is in the chair` : "Pick who sits across from you"}
               </h2>
-              <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-[#d5c7ae]">
+              <p className="mx-auto mt-2 hidden max-w-sm text-sm leading-relaxed text-[#d5c7ae] sm:block">
                 You each get 10,000 chips a hand. A match is 240 hands, then both ratings move.
                 {blinds ? " Blinds are 50 and 100, and the button posts the small blind." : " Blinds are off. An all-check hand moves nothing."}
               </p>
+              <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-[#d5c7ae] sm:hidden">
+                10,000 chips a hand. A match is 240 hands.
+              </p>
             </div>
             {error ? <p className="max-w-sm text-sm text-[#ffb4b4]">{error}</p> : null}
-            <div className="flex flex-wrap items-center justify-center gap-2">
+            <div className="flex w-full max-w-sm flex-wrap items-end justify-center gap-2">
+              <MusicSelect id="heads-music" value={track} onChange={chooseMusic} />
               <Button className="min-h-12" size="lg" onClick={() => deal()}>
                 Deal the hand
               </Button>
@@ -337,7 +356,11 @@ function voice(actName: Act, current: HandMachine) {
                 ))}
               </div>
             </div>
-            <div className="sticky bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-20 w-full rounded-xl border border-black/50 bg-[#101010]/95 p-2 backdrop-blur">
+            <div className="z-20 w-full rounded-xl border border-black/50 bg-[#101010]/95 p-2 backdrop-blur sm:sticky sm:bottom-[max(0.5rem,env(safe-area-inset-bottom))]">
+              <div className="mb-2 flex flex-wrap items-end gap-2">
+                <MusicSelect id="heads-music-bar" value={track} onChange={chooseMusic} />
+                <SoundButton on={soundOn} onToggle={toggleSound} />
+              </div>
               {error ? <p className="mb-2 text-sm text-[#ffb4b4]">{error}</p> : null}
               {hand.phase === "done" ? (
                 <div className="grid grid-cols-2 gap-2">
@@ -415,7 +438,7 @@ function voice(actName: Act, current: HandMachine) {
           </div>
           <p className="mt-1 text-sm">You {formatChips(nets[0])} · {formatElo(yourElo)}</p>
           <p className="text-sm">{opponent?.name ?? "Opponent"} {formatChips(nets[1])}{opponent ? ` · ${formatElo(liveRatings(opponent.botId).own)}` : ""}</p>
-          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+          <p className="mt-2 hidden text-xs leading-relaxed text-muted-foreground sm:block">
             Match hand {dealt} / {HANDS_PER_MATCH}. Ratings move when the 240th hand ends. A new opponent starts the chips over and leaves a short sit unrated.
             {locked ? " This run is locked, so nothing here changes the ladder." : " The field plays its own matches beside you."}
           </p>

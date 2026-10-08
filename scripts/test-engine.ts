@@ -6,7 +6,8 @@ import { applyKaijiPopulation, botSignature, generateField, teamName, teamPools,
 import { drawPracticeSeats, selectPracticeBot } from "../src/lib/controller";
 import { decryptHoles, encryptHoles, makeSeatKeys } from "../src/lib/room-crypto";
 import { SEAT_STALE_MS, TableHost, hostStillAlive, seatChoices } from "../src/lib/room-host";
-import { cleanChatText, cleanRoomCode, seatSpot, turnText, visibleHole, type SeatView } from "../src/lib/table-view";
+import { MUSIC_TRACKS, resolveMusicId } from "../src/lib/table-music";
+import { SAY_HOLD_MS, cleanChatText, cleanRoomCode, seatSpeech, seatSpot, spellCount, turnText, visibleHole, type SeatView } from "../src/lib/table-view";
 import { HandMachine, playHand, type Decision } from "../src/lib/hand";
 import { kaijiDecision, kaijiPostflopShove, kaijiPreflopShove } from "../src/lib/kaiji";
 import { drawRound, playHeadsUpMatch, playRatedMatch, tableSizes } from "../src/lib/match";
@@ -539,6 +540,29 @@ check("showdown turns a live hand face up", JSON.stringify(visibleHole(secretHol
 check("chat keeps a short spoken line", cleanChatText("  hello\nthere  ") === "hello there");
 check("chat drops an empty line", cleanChatText(" \n\t ") === "");
 check("chat stops at 160 characters", cleanChatText("a".repeat(200)).length === 160);
+check("track ids are unique", new Set(MUSIC_TRACKS.map((track) => track.id)).size === MUSIC_TRACKS.length);
+check("track names are unique", new Set(MUSIC_TRACKS.map((track) => track.name)).size === MUSIC_TRACKS.length);
+check(
+  "every note sits inside its bar",
+  MUSIC_TRACKS.every((track) => track.notes.every((note) => note.step >= 0 && note.step < track.steps)),
+);
+check(
+  "castle tracks crack a whip",
+  MUSIC_TRACKS.filter((track) => track.style === "Castle").every((track) => track.notes.some((note) => note.voice === "whip")),
+);
+check("unknown music falls back to the table pulse", resolveMusicId("nope") === "felt-pulse");
+check("a named track keeps its id", resolveMusicId("night-chapel") === "night-chapel");
+check("letters appear one at a time", spellCount(0, 5) === 0 && spellCount(45, 5) === 1 && spellCount(1000, 5) === 5);
+const saySeats = [{ name: "Ann" }, { name: "Bea" }];
+const sayLines = [
+  { id: "1", name: "Ann", text: "hello", at: 1000 },
+  { id: "2", name: "bea", text: "raise", at: 2000 },
+  { id: "3", name: "Ann", text: "call", at: 1500 },
+];
+const spoken = seatSpeech(saySeats, sayLines, 3000);
+check("speech matches the seat that talked", spoken[0]?.id === "3" && spoken[0]?.text === "call" && spoken[1]?.text === "raise");
+const stale = seatSpeech(saySeats, sayLines, 2000 + SAY_HOLD_MS + 1);
+check("a stale line leaves the seat", stale[0]?.text === "" && stale[1]?.text === "");
 check("a room code drops letters that look like digits", cleanRoomCode("ab1iol") === "ABL");
 
 const roomBots = generateField("room-table", 7, 50).bots;

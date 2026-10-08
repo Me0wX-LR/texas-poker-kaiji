@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Settings } from "lucide-react";
+import { MusicSelect } from "@/components/music-select";
 import { PokerTable } from "@/components/poker-table";
 import { RoomTable } from "@/components/room-table";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ import { kaijiDecision } from "@/lib/kaiji";
 import { decideBot, type Bot } from "@/lib/policy";
 import { Rng, hashString } from "@/lib/rng";
 import { TableAudio, handResult } from "@/lib/table-audio";
+import { rememberMusic, savedMusicId } from "@/lib/table-music";
 import { cleanRoomCode, streetLabel, visibleHole, type TableView } from "@/lib/table-view";
 
 const STREETS = ["Preflop", "Flop", "Turn", "River"];
@@ -68,6 +70,7 @@ export function SixMax({
   const [error, setError] = useState<string | null>(null);
   const [sizing, setSizing] = useState<number[] | null>(null);
   const [soundOn, setSoundOn] = useState(true);
+  const [track, setTrack] = useState("felt-pulse");
   const audio = useRef<TableAudio | null>(null);
   const heardTurn = useRef(false);
   const rootRef = useRef<HTMLElement | null>(null);
@@ -107,6 +110,9 @@ export function SixMax({
   useEffect(() => {
     const table = audio.current ?? new TableAudio();
     audio.current = table;
+    const id = savedMusicId();
+    setTrack(id);
+    table.setTrack(id);
     setSoundOn(!table.muted);
     const node = rootRef.current;
     const observer = node
@@ -336,6 +342,13 @@ export function SixMax({
     if (next && handRef.current) audio.current?.startMusic();
   }
 
+  function chooseMusic(id: string) {
+    const next = rememberMusic(id);
+    setTrack(next);
+    audio.current?.setTrack(next);
+    audio.current?.startMusic();
+  }
+
   function eloOf(seat: PracticeSeat | null): number {
     return seat ? liveRatings(seat.botId).own : 1500;
   }
@@ -443,7 +456,8 @@ export function SixMax({
         <div className="flex flex-col gap-3">
           <PokerTable view={soloView} />
           <div ref={actionRef} className="z-20 rounded-xl border border-black/50 bg-[#101010]/95 p-2 backdrop-blur sm:sticky sm:bottom-[max(0.5rem,env(safe-area-inset-bottom))]">
-            <div className="mb-2 flex justify-end">
+            <div className="mb-2 flex flex-wrap items-end gap-2">
+              <MusicSelect id="solo-music" value={track} onChange={chooseMusic} />
               <SoundButton on={soundOn} onToggle={toggleSound} />
             </div>
             {error ? <p className="mb-2 text-sm text-[#ffb4b4]">{error}</p> : null}

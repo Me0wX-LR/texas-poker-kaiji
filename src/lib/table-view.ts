@@ -80,6 +80,41 @@ export interface TableView {
   seats: SeatView[];
 }
 
+export const SAY_HOLD_MS = 12000;
+
+/** How many characters of a spoken line are visible after `elapsedMs`. */
+export function spellCount(elapsedMs: number, length: number, msPerChar = 45): number {
+  if (length <= 0 || elapsedMs <= 0) return 0;
+  return Math.min(length, Math.floor(elapsedMs / msPerChar));
+}
+
+export interface SayLine {
+  id: string;
+  name: string;
+  text: string;
+  at: number;
+}
+
+/** Latest line for each seat, still inside the hold window. Empty text means silence. */
+export function seatSpeech(
+  seats: { name: string }[],
+  lines: SayLine[],
+  now: number,
+  holdMs = SAY_HOLD_MS,
+): { id: string; text: string }[] {
+  return seats.map((seat) => {
+    const key = seat.name.trim().toLowerCase();
+    if (!key) return { id: "", text: "" };
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (!line || now - line.at > holdMs || !line.text.trim()) continue;
+      if (line.name.trim().toLowerCase() !== key) continue;
+      return { id: line.id, text: line.text };
+    }
+    return { id: "", text: "" };
+  });
+}
+
 export function turnText(view: Pick<TableView, "phase" | "actor" | "yourSeat" | "seats">): string {
   if (view.phase === "lobby") return "Take a seat";
   if (view.phase === "show" || view.actor < 0) return view.phase === "show" ? "Hand over" : "Dealing";

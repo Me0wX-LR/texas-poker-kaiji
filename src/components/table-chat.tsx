@@ -8,6 +8,7 @@ export interface ChatLine {
   id: string;
   name: string;
   text: string;
+  at: number;
 }
 
 export function TableChat({

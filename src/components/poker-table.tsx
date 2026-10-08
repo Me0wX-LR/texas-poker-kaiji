@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PlayingCard } from "@/components/cards";
-import { seatSpot, turnText, type TableView } from "@/lib/table-view";
+import { seatSpot, spellCount, turnText, type TableView } from "@/lib/table-view";
 
 export function PokerTable({
   view,
+  says,
   onSit,
   onVacate,
 }: {
   view: TableView;
+  says?: { id: string; text: string }[];
   onSit?: (seat: number) => void;
   onVacate?: (seat: number) => void;
 }) {
@@ -50,8 +52,11 @@ export function PokerTable({
         const acting = view.phase === "act" && view.actor === index;
         const dealer = view.phase !== "lobby" && view.button === index;
         const cardsAbove = spot.y >= 50;
+        const line = says?.[index];
+        const speaking = Boolean(line?.text);
         const body = (
           <>
+            {speaking && line ? <SeatSay token={line.id || String(index)} text={line.text} /> : null}
             {cardsAbove ? <SeatCards seat={seat} yours={seat.isYou} /> : null}
             <div className="table-cushion" />
             <div className={`table-avatar ${seat.empty ? "empty" : ""} ${seat.human ? "human" : ""}`}>
@@ -68,7 +73,7 @@ export function PokerTable({
             {seat.away ? <p className="table-flag away">Disconnected</p> : acting ? <p className="table-flag">Turn</p> : null}
           </>
         );
-        const className = `table-seat ${acting ? "turn" : ""} ${seat.folded ? "folded" : ""} ${seat.away ? "away" : ""} ${seat.isYou ? "you" : ""} ${spot.slot === 0 ? "near" : ""}`;
+        const className = `table-seat ${acting ? "turn" : ""} ${seat.folded ? "folded" : ""} ${seat.away ? "away" : ""} ${seat.isYou ? "you" : ""} ${spot.slot === 0 ? "near" : ""} ${spot.y < 36 ? "say-below" : ""} ${speaking ? "speaking" : ""}`;
         const style = { left: `${spot.x}%`, top: `${spot.y}%` };
         const vacate = Boolean(onVacate && !seat.isYou && (seat.away || (!seat.empty && !seat.human)));
         const claim = Boolean(seat.empty && onSit);
@@ -104,6 +109,25 @@ export function PokerTable({
         );
       })}
     </div>
+  );
+}
+
+function SeatSay({ token, text }: { token: string; text: string }) {
+  const [shown, setShown] = useState(text ? 1 : 0);
+  useEffect(() => {
+    const started = performance.now();
+    setShown(text ? 1 : 0);
+    if (!text) return;
+    const timer = window.setInterval(() => {
+      setShown(Math.max(1, spellCount(performance.now() - started, text.length, 42)));
+    }, 42);
+    return () => window.clearInterval(timer);
+  }, [token, text]);
+  if (!text) return null;
+  return (
+    <p className="seat-say" data-testid="seat-say" data-say={token}>
+      {text.slice(0, shown)}
+    </p>
   );
 }
 

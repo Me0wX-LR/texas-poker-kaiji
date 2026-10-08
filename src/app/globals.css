@@ -373,8 +373,42 @@
   color: #f4efe6;
 }
 
+.seat-say {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  z-index: 8;
+  max-width: 9rem;
+  margin: 0;
+  padding: 0.05rem 0.2rem;
+  transform: translate(-50%, -0.2rem);
+  color: #ffff00;
+  font-family: "Silkscreen", ui-monospace, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: center;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  text-shadow:
+    1px 1px 0 #000,
+    -1px -1px 0 #000,
+    1px -1px 0 #000,
+    -1px 1px 0 #000;
+}
+
+.table-seat.say-below .seat-say {
+  top: 100%;
+  bottom: auto;
+  transform: translate(-50%, 0.15rem);
+}
+
 .table-seat.turn {
   z-index: 6;
+}
+
+.table-seat.speaking {
+  z-index: 7;
 }
 
 .table-seat.turn .table-avatar {
@@ -460,6 +494,10 @@
   .table-detail,
   .table-flag {
     font-size: 0.58rem;
+  }
+  .seat-say {
+    max-width: 5.6rem;
+    font-size: 0.52rem;
   }
 }
 

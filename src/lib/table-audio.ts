@@ -1,3 +1,5 @@
+import { musicById, resolveMusicId, savedMusicId } from "@/lib/table-music";
+
 const SOUND_KEY = "texas-poker-kaiji-sound";
 
 type OscKind = OscillatorType;
@@ -13,14 +15,28 @@ export class TableAudio {
   private fx: GainNode | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private nextAt = 0;
-  private beat = 0;
+  private step = 0;
+  private trackId: string;
   private noise: AudioBuffer | null = null;
   muted = false;
   private wanted = false;
   private audible = true;
 
   constructor() {
+    this.trackId = savedMusicId();
     if (typeof localStorage !== "undefined") this.muted = localStorage.getItem(SOUND_KEY) === "off";
+  }
+
+  setTrack(id: string): void {
+    const next = resolveMusicId(id);
+    if (next === this.trackId && this.timer !== null) return;
+    this.trackId = next;
+    this.step = 0;
+    this.nextAt = 0;
+    if (this.timer !== null) {
+      this.stopLoop();
+      if (this.wanted && this.audible && !this.muted) this.startLoop();
+    }
   }
 
   unlock(): void {
@@ -158,21 +174,25 @@ export class TableAudio {
       this.timer = null;
       return;
     }
-    const bass = [73.42, 73.42, 87.31, 73.42, 55, 73.42, 65.41, 98];
+    const score = musicById(this.trackId);
+    if (!score) {
+      this.timer = null;
+      return;
+    }
+    const stepDur = 60 / score.bpm / 4;
     const horizon = ctx.currentTime + 0.7;
     while (this.nextAt < horizon) {
-      const freq = bass[this.beat % bass.length];
-      strike(ctx, dest, this.nextAt, freq, 0.24, "triangle", 0.34);
-      strike(ctx, dest, this.nextAt, freq / 2, 0.28, "sine", 0.22);
-      if (this.beat % 2 === 1) this.hat(this.nextAt);
-      if (this.beat % 8 === 4) {
-        strike(ctx, dest, this.nextAt, freq * 3, 0.18, "square", 0.05);
-        strike(ctx, dest, this.nextAt, freq * 4, 0.16, "square", 0.04);
+      const step = this.step % score.steps;
+      for (const note of score.notes) {
+        if (note.step !== step) continue;
+        if (note.voice === "hat") this.hat(this.nextAt);
+        else if (note.voice === "whip") this.whip(this.nextAt);
+        else strike(ctx, dest, this.nextAt, midiHz(note.midi), Math.max(note.dur * stepDur, 0.05), note.type, note.gain);
       }
-      this.beat += 1;
-      this.nextAt += 0.3;
+      this.step += 1;
+      this.nextAt += stepDur;
     }
-    this.timer = setTimeout(this.pump, 180);
+    this.timer = setTimeout(this.pump, Math.max(40, stepDur * 400));
   };
 
   private blip(freq: number, dur: number, type: OscKind, gain: number, delay = 0): void {
@@ -220,6 +240,27 @@ export class TableAudio {
     osc.stop(now + 0.24);
   }
 
+  private whip(when: number): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.music || !this.noise) return;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.setValueAtTime(2400, when);
+    filter.frequency.exponentialRampToValueAtTime(380, when + 0.08);
+    filter.Q.value = 0.7;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, when);
+    gain.gain.exponentialRampToValueAtTime(0.22, when + 0.004);
+    gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.09);
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.music);
+    src.start(when);
+    src.stop(when + 0.1);
+  }
+
   private hat(when: number): void {
     const ctx = this.ctx;
     if (!ctx || !this.music || !this.noise) return;
@@ -238,6 +279,10 @@ export class TableAudio {
     src.start(when);
     src.stop(when + 0.05);
   }
+}
+
+function midiHz(midi: number): number {
+  return 440 * 2 ** ((midi - 69) / 12);
 }
 
 function strike(ctx: AudioContext, dest: AudioNode, when: number, freq: number, dur: number, type: OscKind, level: number): void {

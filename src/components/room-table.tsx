@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Settings } from "lucide-react";
+import { MusicSelect } from "@/components/music-select";
 import { PokerTable } from "@/components/poker-table";
 import { TableChat, type ChatLine } from "@/components/table-chat";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,8 @@ import { openRoomBus, type RoomBus, type RoomEvent } from "@/lib/room-bus";
 import { SEAT_STALE_MS, TableHost, hostStillAlive, hostView, seatChoices } from "@/lib/room-host";
 import { Rng, hashString } from "@/lib/rng";
 import { TableAudio } from "@/lib/table-audio";
-import { cleanChatText, cleanPlayerName, cleanRoomCode, makeRoomCode, streetLabel, turnText, visibleHole, type HoleView, type TableView } from "@/lib/table-view";
+import { rememberMusic, resolveMusicId, savedMusicId } from "@/lib/table-music";
+import { cleanChatText, cleanPlayerName, cleanRoomCode, makeRoomCode, seatSpeech, streetLabel, turnText, visibleHole, type HoleView, type TableView } from "@/lib/table-view";
 
 interface WireSeat {
   name: string;
@@ -59,6 +61,7 @@ interface WireState {
   holes: (string | null)[];
   revealed: (number[] | null)[];
   legal: WireLegal | null;
+  music?: string;
 }
 
 export function RoomTable({
@@ -95,6 +98,8 @@ export function RoomTable({
   const [chairsOn, setChairsOn] = useState(false);
   const [chatLines, setChatLines] = useState<ChatLine[]>([]);
   const [unread, setUnread] = useState(0);
+  const [track, setTrack] = useState("felt-pulse");
+  const [spokenAt, setSpokenAt] = useState(0);
   const toolsOpenRef = useRef(false);
   const lastChat = useRef(0);
   const clientId = useRef(rememberPlayerId(role));
@@ -111,6 +116,8 @@ export function RoomTable({
   const hostClient = useRef<string | null>(null);
   const hostGoneRef = useRef(false);
   const audio = useRef<TableAudio | null>(null);
+  const trackRef = useRef("felt-pulse");
+  const heardMusic = useRef("");
   blindsRef.current = blinds;
   botsRef.current = bots;
   function roster(): Bot[] {
@@ -136,6 +143,22 @@ export function RoomTable({
   useEffect(() => {
     audio.current?.setAudible(active);
   }, [active]);
+
+  useEffect(() => {
+    if (role !== "host") return;
+    const id = savedMusicId();
+    trackRef.current = id;
+    setTrack(id);
+    audio.current?.setTrack(id);
+  }, [role]);
+
+  useEffect(() => {
+    const latest = chatLines[chatLines.length - 1]?.id;
+    if (!latest) return;
+    setSpokenAt(Date.now());
+    const timer = window.setInterval(() => setSpokenAt(Date.now()), 400);
+    return () => window.clearInterval(timer);
+  }, [chatLines]);
 
   useEffect(() => {
     const table = audio.current ?? new TableAudio();
@@ -272,7 +295,7 @@ export function RoomTable({
     const n = ++seq.current;
     publishTail.current = publishTail.current.then(async () => {
       if (n !== seq.current || !host.current) return;
-      const body = await wireFrom(host.current, mine);
+      const body = await wireFrom(host.current, mine, trackRef.current);
       link.publish({ id: nextId(), type: "state", clientId: clientId.current, seq: n, body }, true);
     }).catch(() => undefined);
     await publishTail.current;
@@ -296,7 +319,7 @@ export function RoomTable({
     if (now - lastChat.current < 400) return;
     lastChat.current = now;
     const id = nextId();
-    pushChat({ id, name: cleanPlayerName(name), text: clean });
+    pushChat({ id, name: cleanPlayerName(name), text: clean, at: now });
     bus.current.publish({
       id,
       type: "chat",
@@ -311,7 +334,7 @@ export function RoomTable({
       const body = event.body as { name?: string; text?: string };
       const text = cleanChatText(typeof body?.text === "string" ? body.text : "");
       if (!text) return;
-      pushChat({ id: event.id, name: cleanPlayerName(typeof body?.name === "string" ? body.name : "Player"), text });
+      pushChat({ id: event.id, name: cleanPlayerName(typeof body?.name === "string" ? body.name : "Player"), text, at: Date.now() });
       return;
     }
     if (event.clientId === clientId.current && event.type !== "join") return;
@@ -403,6 +426,16 @@ export function RoomTable({
     }
     setOwnCards(cards);
     setWire(body);
+    if (body.music) {
+      const next = resolveMusicId(body.music);
+      if (heardMusic.current !== next) {
+        heardMusic.current = next;
+        trackRef.current = next;
+        setTrack(next);
+        audio.current?.setTrack(next);
+        audio.current?.startMusic();
+      }
+    }
     if (body.actor === seat && body.phase === "act") audio.current?.yourTurn();
   }
 
@@ -431,6 +464,13 @@ export function RoomTable({
       /* private mode can refuse storage; the chair still works for this page */
     }
     audio.current?.unlock();
+    if (role === "host") {
+      const id = resolveMusicId(trackRef.current || savedMusicId());
+      trackRef.current = id;
+      setTrack(id);
+      audio.current?.setTrack(id);
+      audio.current?.startMusic();
+    }
     if (role === "guest") {
       window.setTimeout(() => {
         bus.current?.publish({
@@ -528,6 +568,16 @@ export function RoomTable({
     refresh();
   }
 
+  function chooseMusic(id: string) {
+    if (role !== "host") return;
+    const next = rememberMusic(id);
+    trackRef.current = next;
+    setTrack(next);
+    audio.current?.setTrack(next);
+    audio.current?.startMusic();
+    if (code) void publish();
+  }
+
   function fillSeat(seat: number, request: SeatRequest) {
     const table = host.current;
     if (!table) return;
@@ -580,11 +630,14 @@ export function RoomTable({
           <Button className="mt-3 min-h-12 w-full" onClick={() => void connect(role === "host" ? "" : codeInput, savedName && !name.trim() ? savedName : name)}>
             {role === "host" ? "Open the table" : savedName && cleanPlayerName(name || savedName) === savedName ? "Sit back down" : "Sit down"}
           </Button>
-          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+          <p className="mt-2 hidden text-xs leading-relaxed text-muted-foreground sm:block">
             Share the code with the people at the table. Open chairs stay open so a friend can sit. The host can kick a player, seat a random AI, or tap a named player. Empty chairs still fill at random when the host deals. The host deals the cards. Hole cards are encrypted to each seat. This table does not move the ladder.
             {role === "guest"
               ? " If you disconnect, your chair stays. Sit back down with the same name, even in the middle of a hand. If the host leaves, the game ends."
               : " A friend who disconnects keeps their chair until they sit back down with the same name."}
+          </p>
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground sm:hidden">
+            Share the code. Friends sit in open chairs. The host deals.
           </p>
         </div>
       ) : (
@@ -597,7 +650,7 @@ export function RoomTable({
               {code}
             </p>
           </div>
-          <div className="mt-2 flex flex-wrap gap-2">
+          <div className="mt-2 hidden flex-wrap gap-2 sm:flex">
             <Button
               type="button"
               className="min-h-11"
@@ -628,6 +681,7 @@ export function RoomTable({
           <DialogHeader>
             <DialogTitle>Table</DialogTitle>
           </DialogHeader>
+          <MusicSelect id={role === "host" ? "room-music" : "room-music-guest"} value={resolveMusicId(track)} disabled={role !== "host"} onChange={chooseMusic} />
           <TableChat lines={chatLines} onSend={sendChat} />
           {role === "host" ? (
             <Button type="button" className="min-h-11" variant={chairsOn ? "default" : "outline"} onClick={() => setChairsOn((value) => !value)}>
@@ -683,6 +737,7 @@ export function RoomTable({
           <div className="order-1 sm:order-2">
           <PokerTable
             view={view}
+            says={seatSpeech(view.seats, chatLines, spokenAt || Date.now())}
             onSit={
               code && role === "guest"
                 ? sit
@@ -767,7 +822,7 @@ export function RoomTable({
               <p className="text-center text-sm text-[#d5c7ae]">Waiting for the host to deal the next hand.</p>
             ) : null}
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="hidden text-xs text-muted-foreground sm:block">
             Session {view.seats.map((seat, index) => (seat.empty ? null : `${seat.name} ${formatChips((local?.nets ?? wire?.nets ?? [])[index] ?? 0)}`)).filter(Boolean).join(" · ")}
           </p>
           </div>
@@ -777,7 +832,7 @@ export function RoomTable({
   );
 }
 
-async function wireFrom(table: TableHost, mine: SeatKeys): Promise<WireState> {
+async function wireFrom(table: TableHost, mine: SeatKeys, music: string): Promise<WireState> {
   const hand = table.hand;
   const rawHoles = hand ? hand.hole.map((cards) => cards.slice()) : null;
   const foldedNow = hand ? hand.folded.slice() : [false, false, false, false, false, false];
@@ -817,7 +872,7 @@ async function wireFrom(table: TableHost, mine: SeatKeys): Promise<WireState> {
       else if (key && seat) holes[i] = await encryptHoles(mine.privateKey, key, rawHoles[i]);
     }
   }
-  return { ...publicState, hostPub: mine.publicKey, holes, revealed, legal };
+  return { ...publicState, hostPub: mine.publicKey, holes, revealed, legal, music: resolveMusicId(music) };
 }
 
 function HostChairs({
@@ -851,7 +906,7 @@ function HostChairs({
   return (
     <div className="rounded-xl border bg-card p-3" data-testid="host-seats">
       <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Chairs</p>
-      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+      <p className="mt-1 hidden text-xs leading-relaxed text-muted-foreground sm:block">
         An open chair can take a friend with the code, a random AI, or a named player you tap. Kick removes a player. Kaiji can sit once.
       </p>
       <ul className="mt-2 flex flex-col gap-2">
