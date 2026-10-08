@@ -25,7 +25,7 @@ Open [http://127.0.0.1:47221](http://127.0.0.1:47221).
 - **New run** sets the seed and the player count (50 to 1,200, default 1,200). There are no teams. The same seed repeats the deals.
 - **Ladder** ranks each player by their own Elo. Switch between the top 20 and the top 100.
 - **Win rate**, shown to the left of Kaiji's Elo, is the share of rated matches in which he tied or took the best chip result.
-- Phones can play it in Safari or Chrome. Add it to the home screen if you want it full screen. On a phone the mode tabs stay in one scrolling row, the header stats shrink, and extra copy stays off the felt. Heads-up and six-max buttons sit under the table instead of covering it.
+- Phones can play it in Safari or Chrome. Add it to the home screen if you want it full screen. A phone and a wide screen are different layouts. On a phone, Heads-up and Six-max drop the ladder header, the match line, and the tab row. A section menu stays, and the felt fills whatever height is left above the buttons. Seat notes stay off the tokens. A wider screen keeps the header, the tabs, and the full seat notes.
 
 The default deadline is 1,008 matches: one match every 10 simulated minutes from 5 Oct 2026 00:00 UTC through the 23:50 UTC match on 11 Oct 2026. Each match is 240 hands, shown as read-only text. The hand stop is the match count times 240 (241,920 at the default) and updates when the match count changes. Either limit stops the run. A match cut off before 240 hands is not rated.
 

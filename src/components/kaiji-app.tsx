@@ -142,13 +142,27 @@ export function KaijiApp() {
     }
   }
 
+  function chooseTab(next: string) {
+    setTab(next);
+    if (next === "heads" || next === "six") setSimOpen(false);
+    if (next === "table") setSimOpen(true);
+  }
+
+  const playing = tab === "heads" || tab === "six";
+
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-6xl flex-col gap-4 px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6">
-      <header className="flex flex-wrap items-center gap-3">
+    <main
+      data-play={playing ? tab : "0"}
+      className="mx-auto flex min-h-dvh w-full max-w-6xl flex-col gap-4 px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6"
+    >
+      <header className="app-header flex flex-wrap items-center gap-3">
         <img src={asset("/kaiji.png")} alt="Kaiji" className="pixel-art size-12 border-2 border-black shadow-[3px_3px_0_#000] sm:size-14" />
         <div className="min-w-0 flex-1">
           <p className="font-display text-[10px] tracking-[0.35em] text-[#ff6b6b]">ざわ…ざわ…</p>
-          <h1 className="font-display text-sm sm:text-base">Texas Poker Kaiji</h1>
+          <div className="flex items-baseline gap-2">
+            <h1 className="font-display text-sm sm:text-base">Texas Poker Kaiji</h1>
+            <p className="font-display text-xs text-[#ff5d5d] sm:hidden">{formatElo(snap.kaijiElo)}</p>
+          </div>
           <p className="hidden text-sm text-muted-foreground sm:block">A static shove, sat against a field that is allowed to change its mind.</p>
         </div>
         <Button
@@ -161,15 +175,15 @@ export function KaijiApp() {
         >
           <Settings className="size-5" />
         </Button>
-        <div className="ml-auto flex gap-2">
-          <div className="min-w-[5.5rem] rounded-xl border bg-card px-3 py-2 text-right max-sm:min-w-[4.5rem] max-sm:px-2 max-sm:py-1">
+        <div className="app-stats ml-auto hidden gap-2 sm:flex">
+          <div className="min-w-[5.5rem] rounded-xl border bg-card px-3 py-2 text-right">
             <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Win rate</p>
-            <p className="font-display text-base text-[#e2b657] sm:text-lg">{winRateLabel(snap)}</p>
-            <p className="hidden text-[10px] text-muted-foreground sm:block">{winRateDetail(snap)}</p>
+            <p className="font-display text-lg text-[#e2b657]">{winRateLabel(snap)}</p>
+            <p className="text-[10px] text-muted-foreground">{winRateDetail(snap)}</p>
           </div>
-          <div className="min-w-[5.5rem] rounded-xl border bg-card px-3 py-2 text-right max-sm:min-w-[4.5rem] max-sm:px-2 max-sm:py-1">
+          <div className="min-w-[5.5rem] rounded-xl border bg-card px-3 py-2 text-right">
             <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{snap.locked ? "Locked Elo" : "Kaiji Elo"}</p>
-            <p className="font-display text-base text-[#ff5d5d] sm:text-lg">{formatElo(snap.kaijiElo)}</p>
+            <p className="font-display text-lg text-[#ff5d5d]">{formatElo(snap.kaijiElo)}</p>
           </div>
         </div>
       </header>
@@ -185,7 +199,7 @@ export function KaijiApp() {
           The table stopped: {snap.error} Start a new run to clear the saved ladder.
         </div>
       ) : null}
-      {snap.notice ? <p className="text-sm text-muted-foreground">{snap.notice}</p> : null}
+      {snap.notice ? <p className="app-notice text-sm text-muted-foreground">{snap.notice}</p> : null}
 
       {simOpen ? (
       <section className="grid gap-3 rounded-xl border bg-card p-3">
@@ -287,28 +301,37 @@ export function KaijiApp() {
         </p>
       </section>
       ) : (
-        <p className="text-xs text-muted-foreground">
+        <p className="app-matchline text-xs text-muted-foreground">
           Match {snap.matchesCompleted.toLocaleString("en-US")} / {snap.matchDeadline.toLocaleString("en-US")}. The gear brings the speed and the deadline back.
         </p>
       )}
 
-      <Tabs
-        value={tab}
-        onValueChange={(value) => {
-          const next = String(value);
-          setTab(next);
-          if (next === "heads" || next === "six") setSimOpen(false);
-          if (next === "table") setSimOpen(true);
-        }}
-      >
-        <TabsList className="flex h-auto w-full flex-wrap max-sm:h-11 max-sm:flex-nowrap max-sm:justify-start max-sm:overflow-x-auto">
-          <TabsTrigger className="min-h-11 px-3 max-sm:flex-none max-sm:shrink-0" value="table">The table</TabsTrigger>
-          <TabsTrigger className="min-h-11 px-3 max-sm:flex-none max-sm:shrink-0" value="ladder">Ladder</TabsTrigger>
-          <TabsTrigger className="min-h-11 px-3 max-sm:flex-none max-sm:shrink-0" value="tiers">Tier list</TabsTrigger>
-          <TabsTrigger className="min-h-11 px-3 max-sm:flex-none max-sm:shrink-0" value="experiment">Experiment</TabsTrigger>
-          <TabsTrigger className="min-h-11 px-3 max-sm:flex-none max-sm:shrink-0" value="heads">Heads-up</TabsTrigger>
-          <TabsTrigger className="min-h-11 px-3 max-sm:flex-none max-sm:shrink-0" value="six">Six-max</TabsTrigger>
-          <TabsTrigger className="min-h-11 px-3 max-sm:flex-none max-sm:shrink-0" value="rules">Rules</TabsTrigger>
+      <Tabs value={tab} onValueChange={(value) => chooseTab(String(value))}>
+        <label className="sm:hidden">
+          <span className="sr-only">Section</span>
+          <select
+            aria-label="Section"
+            className="min-h-11 w-full rounded-lg border border-input bg-[#161616] px-2.5 text-base text-[#f4efe6]"
+            value={tab}
+            onChange={(event) => chooseTab(event.target.value)}
+          >
+            <option value="table">The table</option>
+            <option value="ladder">Ladder</option>
+            <option value="tiers">Tier list</option>
+            <option value="experiment">Experiment</option>
+            <option value="heads">Heads-up</option>
+            <option value="six">Six-max</option>
+            <option value="rules">Rules</option>
+          </select>
+        </label>
+        <TabsList className="hidden h-auto w-full flex-wrap sm:flex">
+          <TabsTrigger className="min-h-11 px-3" value="table">The table</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3" value="ladder">Ladder</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3" value="tiers">Tier list</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3" value="experiment">Experiment</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3" value="heads">Heads-up</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3" value="six">Six-max</TabsTrigger>
+          <TabsTrigger className="min-h-11 px-3" value="rules">Rules</TabsTrigger>
         </TabsList>
 
         <TabsContent value="table" className="mt-3">

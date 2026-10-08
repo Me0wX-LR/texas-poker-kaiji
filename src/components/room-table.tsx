@@ -641,9 +641,9 @@ export function RoomTable({
           </p>
         </div>
       ) : (
-        <div className="rounded-xl border bg-card p-3">
+        <div className="room-status shrink-0 rounded-xl border bg-card p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+            <p className="room-relay text-xs uppercase tracking-[0.16em] text-muted-foreground">
               {relay === "relay" ? "Friends can join from another phone" : relay === "local" ? "Open on this device only" : "Connecting the room"}
             </p>
             <p className="font-display text-sm tracking-[0.28em] text-[#e2b657]" data-room-code>
@@ -714,7 +714,7 @@ export function RoomTable({
       ) : view ? (
         <>
           {role === "host" && (chairsOn || !hand) ? (
-            <div className="order-3 sm:order-1">
+            <div className={`order-3 max-h-52 overflow-auto sm:order-1 sm:max-h-none ${picking !== null && picking >= 0 ? "" : "max-sm:hidden"}`}>
             <HostChairs
               seats={view.seats}
               between={!hand || hand.phase === "done"}
@@ -734,7 +734,7 @@ export function RoomTable({
             />
             </div>
           ) : null}
-          <div className="order-1 sm:order-2">
+          <div className="table-play order-1 sm:order-2">
           <PokerTable
             view={view}
             says={seatSpeech(view.seats, chatLines, spokenAt || Date.now())}
@@ -750,7 +750,7 @@ export function RoomTable({
             }
             onVacate={code && role === "host" && (!hand || hand.phase === "done") ? sit : undefined}
           />
-          <div className="z-20 rounded-xl border border-black bg-[#101010]/95 p-2 backdrop-blur sm:sticky sm:bottom-[max(0.5rem,env(safe-area-inset-bottom))]">
+          <div className="z-20 shrink-0 rounded-xl border border-black bg-[#101010]/95 p-2 backdrop-blur sm:sticky sm:bottom-[max(0.5rem,env(safe-area-inset-bottom))]">
             <div className="mb-2 flex">
               <Button
                 type="button"

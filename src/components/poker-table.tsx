@@ -37,15 +37,15 @@ export function PokerTable({
         <p className={`table-turn ${view.actor === view.yourSeat && view.phase === "act" ? "mine" : ""}`} data-turn-label aria-live="polite">
           {turn}
         </p>
-        <p className="text-[10px] uppercase tracking-[0.22em] text-[#e2b657]">{view.streetLabel}</p>
-        <p className="text-sm text-[#f6efe2]">Pot {view.pot.toLocaleString("en-US")}</p>
-        <div className="mt-1 flex min-h-12 items-center justify-center gap-1">
+        <p className="table-street text-[10px] uppercase tracking-[0.22em] text-[#e2b657]">{view.streetLabel}</p>
+        <p className="table-pot text-sm text-[#f6efe2]">Pot {view.pot.toLocaleString("en-US")}</p>
+        <div className="table-board mt-1 flex min-h-12 items-center justify-center gap-1">
           {view.board.length === 0 ? <span className="text-[11px] text-[#d5c7ae]">Board not dealt</span> : null}
           {view.board.map((card) => (
             <PlayingCard key={card} card={card} small />
           ))}
         </div>
-        {view.lastAction ? <p className="mt-1 max-w-[14rem] text-center text-xs text-[#f6efe2]">{view.lastAction}</p> : null}
+        {view.lastAction ? <p className="table-last mt-1 max-w-[14rem] text-center text-xs text-[#f6efe2]">{view.lastAction}</p> : null}
       </div>
       {view.seats.map((seat, index) => {
         const spot = seatSpot(index, view.yourSeat);
@@ -65,6 +65,9 @@ export function PokerTable({
             </div>
             {!cardsAbove ? <SeatCards seat={seat} yours={seat.isYou} /> : null}
             <p className="table-name">{seat.name}</p>
+            <p className="table-stack">
+              {seat.empty ? "Open" : seat.allin ? "All-in" : seat.folded ? "Fold" : seat.stack ? seat.stack.toLocaleString("en-US") : ""}
+            </p>
             <p className="table-detail">
               {seat.empty ? "Open" : seat.detail}
               {!seat.empty && seat.stack ? ` · ${seat.stack.toLocaleString("en-US")}` : ""}
@@ -138,8 +141,8 @@ function SeatCards({
   seat: TableView["seats"][number];
   yours: boolean;
 }) {
-  if (seat.empty) return <div className="h-8" />;
-  if (seat.cards === "muck") return <p className="text-[10px] text-[#d5c7ae]">Mucked</p>;
+  if (seat.empty) return <div className="seat-gap h-8" />;
+  if (seat.cards === "muck") return <p className="seat-muck text-[10px] text-[#d5c7ae]">Mucked</p>;
   const faces = seat.cards === "back" ? [null, null] : seat.cards;
   return (
     <div className="flex justify-center gap-0.5" {...(yours ? { "data-your-cards": true } : {})}>
