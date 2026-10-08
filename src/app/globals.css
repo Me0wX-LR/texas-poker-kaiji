@@ -476,6 +476,9 @@
   .table-seat.near {
     width: 4.35rem;
   }
+  .table-seat.near {
+    transform: translate(-50%, -68%);
+  }
   .table-center {
     width: min(15rem, 76%);
   }
