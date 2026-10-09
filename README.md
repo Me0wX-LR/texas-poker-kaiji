@@ -2,7 +2,7 @@
 
 An offline six-max Texas Hold'em ladder. Kaiji plays one static shove chart. A seeded field of 50 to 1,200 bots — solver GTO, Elo-dynamic, frozen, and locally adapting — shares the same rating pool. The app is here to test a friend's claim: in this room, updating a strategy is wasted work.
 
-No server, no API keys, no network calls at runtime. Ratings stay in `localStorage`.
+Ratings stay in `localStorage`. The ladder itself makes no network calls. Jev is optional and only plays when this computer is running the local table server. The published page does not contain a key.
 
 ## Run locally
 
@@ -12,6 +12,8 @@ npm run dev
 ```
 
 Open [http://127.0.0.1:47221](http://127.0.0.1:47221).
+
+To seat Jev, put `TYPESAFE_API_KEY` in `.env.local` and run `npm run dev`. That file is gitignored. The browser asks `/api/jev` on this machine, and a localhost proxy adds the key. Do not set `NEXT_PUBLIC_TYPESAFE_API_KEY`. A published static page has no proxy, so Jev checks or folds there instead of sending a key.
 
 `npm run test:engine` checks the evaluator, chip conservation, Kaiji's chart, the Elo example, and a full 240-hand match.
 

@@ -10,7 +10,9 @@ import { Slider } from "@/components/ui/slider";
 import { HANDS_PER_MATCH, TIER_LABEL, formatChips, formatElo } from "@/lib/constants";
 import type { BotHit, FieldDuel, LadderRow, PracticePool, PracticeSeat, SeatRequest, TableRate } from "@/lib/controller";
 import { PRACTICE_GROUPS } from "@/lib/field";
+import { JevStatus } from "@/components/jev-status";
 import { HandMachine, positionName, type Act, type Decision } from "@/lib/hand";
+import { askJev } from "@/lib/jev";
 import { kaijiDecision } from "@/lib/kaiji";
 import { decideBot, type Bot } from "@/lib/policy";
 import { Rng, hashString } from "@/lib/rng";
@@ -187,21 +189,36 @@ export function SixMax({
     const current = handRef.current;
     if (!current || current.phase !== "act" || current.actor <= 0) return;
     const actor = current.actor;
+    let cancel = false;
     const timer = window.setTimeout(() => {
-      const live = handRef.current;
-      if (!live || live.phase !== "act" || live.actor !== actor) return;
-      try {
-        const ctx = live.fillCtx(actor);
-        const decision = decideFor(actor, ctx);
-        live.act(actor, decision);
-        voice(decision.act, live);
-        settle(live);
-        refresh();
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "A player could not act.");
-      }
+      void (async () => {
+        const live = handRef.current;
+        if (cancel || !live || live.phase !== "act" || live.actor !== actor) return;
+        try {
+          const player = seatsRef.current[actor - 1];
+          let decision: Decision;
+          if (player?.usesJev) {
+            const names = ["You", ...seatsRef.current.map((seat, index) => seat?.name ?? `Seat ${index + 1}`)];
+            const result = await askJev(live, actor, names);
+            if (cancel || handRef.current !== live || live.phase !== "act" || live.actor !== actor) return;
+            decision = result.decision;
+            if (result.note) setError(result.note);
+          } else {
+            decision = decideFor(actor, live.fillCtx(actor));
+          }
+          live.act(actor, decision);
+          voice(decision.act, live);
+          settle(live);
+          refresh();
+        } catch (cause) {
+          if (!cancel) setError(cause instanceof Error ? cause.message : "A player could not act.");
+        }
+      })();
     }, 700);
-    return () => window.clearTimeout(timer);
+    return () => {
+      cancel = true;
+      window.clearTimeout(timer);
+    };
   }, [tick]);
 
   function settle(current: HandMachine | null) {
@@ -211,7 +228,8 @@ export function SixMax({
     matchHands.current += 1;
     if (matchHands.current >= HANDS_PER_MATCH) {
       const opponents = seatsRef.current.map((seat) => ({ botId: seat?.botId ?? null }));
-      const rated = opponents.every((seat, index) => seatsRef.current[index])
+      const jevSat = seatsRef.current.some((seat) => seat?.usesJev);
+      const rated = !jevSat && opponents.every((seat, index) => seatsRef.current[index])
         ? rateRef.current(opponents, next)
         : null;
       matchHands.current = 0;
@@ -221,7 +239,9 @@ export function SixMax({
       setRateNote(
         rated
           ? `Match rated. You ${formatElo(rated.you)} (${signedElo(rated.youDelta)}). ${rated.seats.map((seat) => `${seat.name} ${signedElo(seat.delta)}`).join(", ")}.`
-          : "This run is locked, so that match was not rated.",
+          : jevSat
+            ? "Jev sits outside the ladder, so that match was not rated."
+            : "This run is locked, so that match was not rated.",
       );
     } else {
       netsRef.current = next;
@@ -653,6 +673,7 @@ function TableSetup({
                   <div role="listbox" className="mt-2 max-h-60 overflow-auto rounded-lg border border-[#4a382c] bg-[#221812] p-1">
                     <PoolChoice selected={draft.pool === "random" && !draft.botId} label="Random player" onPick={() => { onDraft(index, { pool: "random", botId: null, pickedName: "", query: "" }); setOpenMenu(null); }} />
                     <PoolChoice selected={draft.pool === "kaiji" && !draft.botId} label="Kaiji" onPick={() => { onDraft(index, { pool: "kaiji", botId: null, pickedName: "", query: "" }); setOpenMenu(null); }} />
+                    <PoolChoice selected={draft.pool === "jev" && !draft.botId} label="Jev" onPick={() => { onDraft(index, { pool: "jev", botId: null, pickedName: "", query: "" }); setOpenMenu(null); }} />
                     <PoolChoice selected={draft.pool === "kaiji-chart" && !draft.botId} label="Kaiji chart copies" onPick={() => { onDraft(index, { pool: "kaiji-chart", botId: null, pickedName: "", query: "" }); setOpenMenu(null); }} />
                     {PRACTICE_GROUPS.map((group) => (
                       <div key={group.tier}>
@@ -725,6 +746,7 @@ function TableSetup({
       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
         Random five draws anyone in the field, including chart copies. Choose seats sets each chair to a style, a personality, or a typed name. Kaiji himself is in the list and can sit only once. Next hand keeps these five. New table draws the chairs again.
       </p>
+      <JevStatus />
     </div>
   );
 }
@@ -732,6 +754,7 @@ function TableSetup({
 function poolLabel(pool: PracticePool): string {
   if (pool === "random") return "Random player";
   if (pool === "kaiji") return "Kaiji";
+  if (pool === "jev") return "Jev";
   if (pool === "kaiji-chart") return "Kaiji chart copies";
   if (pool.startsWith("style:")) return pool.slice("style:".length);
   return `Any ${TIER_LABEL[pool as keyof typeof TIER_LABEL]}`;

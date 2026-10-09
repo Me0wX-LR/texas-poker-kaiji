@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { HANDS_PER_MATCH, TIER_LABEL, asset, formatChips, formatElo } from "@/lib/constants";
 import { PRACTICE_GROUPS } from "@/lib/field";
+import { JevStatus } from "@/components/jev-status";
 import { HandMachine, type Act, type Decision } from "@/lib/hand";
+import { askJev } from "@/lib/jev";
 import { kaijiDecision } from "@/lib/kaiji";
 import { decideBot } from "@/lib/policy";
 import type { FieldDuel, LadderRow, PracticePool, PracticeRate, PracticeSeat } from "@/lib/controller";
@@ -114,19 +116,34 @@ export function HeadsUp({
   useEffect(() => {
     const current = handRef.current;
     if (!current || current.phase !== "act" || current.actor !== 1) return;
+    let cancel = false;
     const timer = window.setTimeout(() => {
-      try {
-        const ctx = current.fillCtx(1);
-        const decision = opponentDecision(ctx);
-        current.act(1, decision);
-        voice(decision.act, current);
-        settle(current);
-        refresh();
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "The opponent could not act.");
-      }
+      void (async () => {
+        if (cancel || handRef.current !== current || current.phase !== "act" || current.actor !== 1) return;
+        try {
+          const seat = opponentRef.current;
+          let decision: Decision;
+          if (seat?.usesJev) {
+            const result = await askJev(current, 1, ["You", seat.name]);
+            if (cancel || handRef.current !== current || current.phase !== "act" || current.actor !== 1) return;
+            decision = result.decision;
+            if (result.note) setError(result.note);
+          } else {
+            decision = opponentDecision(current.fillCtx(1));
+          }
+          current.act(1, decision);
+          voice(decision.act, current);
+          settle(current);
+          refresh();
+        } catch (cause) {
+          if (!cancel) setError(cause instanceof Error ? cause.message : "The opponent could not act.");
+        }
+      })();
     }, 700);
-    return () => window.clearTimeout(timer);
+    return () => {
+      cancel = true;
+      window.clearTimeout(timer);
+    };
   }, [tick]);
 
   function settle(current: HandMachine | null) {
@@ -139,7 +156,7 @@ export function HeadsUp({
     matchHands.current += 1;
     if (matchHands.current >= HANDS_PER_MATCH) {
       const seat = opponentRef.current;
-      const rated = rateMatch(seat?.botId ?? null, nextNets);
+      const rated = seat?.usesJev ? null : rateMatch(seat?.botId ?? null, nextNets);
       matchHands.current = 0;
       netsRef.current = [0, 0];
       setNets([0, 0]);
@@ -147,7 +164,9 @@ export function HeadsUp({
       setRateNote(
         rated
           ? `Match rated. You ${formatElo(rated.you)} (${signedElo(rated.youDelta)}), ${rated.oppName} ${formatElo(rated.opp)} (${signedElo(rated.oppDelta)}).`
-          : "This run is locked, so that match was not rated.",
+          : seat?.usesJev
+            ? "Jev sits outside the ladder, so that match was not rated."
+            : "This run is locked, so that match was not rated.",
       );
     } else {
       netsRef.current = nextNets;
@@ -437,7 +456,7 @@ function voice(actName: Act, current: HandMachine) {
             <SoundButton on={soundOn} onToggle={toggleSound} />
           </div>
           <p className="mt-1 text-sm">You {formatChips(nets[0])} · {formatElo(yourElo)}</p>
-          <p className="text-sm">{opponent?.name ?? "Opponent"} {formatChips(nets[1])}{opponent ? ` · ${formatElo(liveRatings(opponent.botId).own)}` : ""}</p>
+          <p className="text-sm">{opponent?.name ?? "Opponent"} {formatChips(nets[1])}{opponent && !opponent.usesJev ? ` · ${formatElo(liveRatings(opponent.botId).own)}` : ""}</p>
           <p className="mt-2 hidden text-xs leading-relaxed text-muted-foreground sm:block">
             Match hand {dealt} / {HANDS_PER_MATCH}. Ratings move when the 240th hand ends. A new opponent starts the chips over and leaves a short sit unrated.
             {locked ? " This run is locked, so nothing here changes the ladder." : " The field plays its own matches beside you."}
@@ -453,6 +472,7 @@ function voice(actName: Act, current: HandMachine) {
 function poolLabel(pool: PracticePool): string {
   if (pool === "random") return "Random match";
   if (pool === "kaiji") return "Kaiji";
+  if (pool === "jev") return "Jev";
   if (pool === "kaiji-chart") return "Kaiji chart copies";
   if (pool.startsWith("style:")) return pool.slice("style:".length);
   return `Any ${TIER_LABEL[pool as keyof typeof TIER_LABEL]}`;
@@ -512,6 +532,7 @@ function MatchPicker({
         <div role="listbox" aria-labelledby="match-label" className="mt-2 max-h-72 overflow-auto rounded-lg border border-[#4a382c] bg-[#221812] p-1">
           <MenuChoice pool={pool} value="random" label="Random match" onPick={choose} />
           <MenuChoice pool={pool} value="kaiji" label="Kaiji" onPick={choose} />
+          <MenuChoice pool={pool} value="jev" label="Jev" onPick={choose} />
           <MenuChoice pool={pool} value="kaiji-chart" label="Kaiji chart copies" onPick={choose} />
           {PRACTICE_GROUPS.map((group) => (
             <div key={group.tier}>
@@ -538,6 +559,7 @@ function MatchPicker({
       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
         Random draws anyone in the field. A style or a personality draws one player of that type. Next hand stays with them. New opponent draws again. Both of you are rated after 240 hands. Everyone else keeps playing in the background.
       </p>
+      <JevStatus />
     </div>
   );
 }

@@ -23,6 +23,8 @@ export interface Occupant {
   /** Field id, kept even when a chart copy does not store the bot. */
   botId: string | null;
   detail: string;
+  /** Reads the table through the local Jev proxy. The key never sits on this object. */
+  usesJev?: boolean;
   connected: boolean;
   lastSeen: number;
   kicked: boolean;
@@ -262,6 +264,10 @@ export class TableHost {
       this.placeAi(seat, "kaiji");
       return null;
     }
+    if (request.pool === "jev") {
+      this.placeAi(seat, "jev");
+      return null;
+    }
     const pick = selectPracticeBot(bots, request.pool, this.rng.next(), taken);
     if (!pick) return "Nobody left in that group is free to sit.";
     if (pick === "kaiji") {
@@ -273,7 +279,23 @@ export class TableHost {
     return null;
   }
 
-  private placeAi(seat: number, pick: Bot | "kaiji"): void {
+  private placeAi(seat: number, pick: Bot | "kaiji" | "jev"): void {
+    if (pick === "jev") {
+      this.occupants[seat] = {
+        name: "Jev",
+        kind: "ai",
+        playerId: null,
+        publicKey: null,
+        bot: null,
+        botId: "jev",
+        detail: "Jev",
+        usesJev: true,
+        connected: true,
+        lastSeen: Date.now(),
+        kicked: false,
+      };
+      return;
+    }
     if (pick === "kaiji") {
       this.occupants[seat] = {
         name: "Kaiji",
@@ -343,7 +365,7 @@ export class TableHost {
     const hand = this.hand;
     if (!hand || hand.phase !== "act") return false;
     const seat = this.occupants[hand.actor];
-    if (!seat || seat.kind !== "ai") return false;
+    if (!seat || seat.kind !== "ai" || seat.usesJev) return false;
     const ctx = hand.fillCtx(hand.actor);
     const ratings = this.occupants.map((item) => item.bot?.elo ?? INITIAL_ELO);
     ratings[hand.actor] = seat.bot?.elo ?? INITIAL_ELO;
@@ -355,6 +377,17 @@ export class TableHost {
       !seat.bot || seat.detail === "Kaiji chart"
         ? kaijiDecision(ctx.hole0, ctx.hole1, ctx.board, ctx.street, ctx.toCall)
         : decideBot(seat.bot, ctx, () => this.rng.next());
+    hand.act(hand.actor, decision);
+    this.finishIfDone();
+    return true;
+  }
+
+  /** Apply a decision the local Jev proxy already chose for the seat to act. */
+  applyAi(decision: Decision): boolean {
+    const hand = this.hand;
+    if (!hand || hand.phase !== "act") return false;
+    const seat = this.occupants[hand.actor];
+    if (!seat || seat.kind !== "ai" || !seat.usesJev) return false;
     hand.act(hand.actor, decision);
     this.finishIfDone();
     return true;

@@ -1,9 +1,13 @@
+import fs from "node:fs";
+import path from "node:path";
 import { cardCode, categoryOf, evaluateCards, handStrength } from "../src/lib/eval";
 import { class169, decideSolver, solverFrequencies, streetTexture } from "../src/lib/gto";
 import type { Ctx } from "../src/lib/hand";
 import { eloUpdates, expectedScore, placementScores } from "../src/lib/elo";
 import { applyKaijiPopulation, botSignature, generateField, teamName, teamPools, tierPools } from "../src/lib/field";
 import { drawPracticeSeats, selectPracticeBot } from "../src/lib/controller";
+import type { Bot } from "../src/lib/policy";
+import { decisionFromJev, jevQuestions, jevState } from "../src/lib/jev";
 import { decryptHoles, encryptHoles, makeSeatKeys } from "../src/lib/room-crypto";
 import { SEAT_STALE_MS, TableHost, hostStillAlive, seatChoices } from "../src/lib/room-host";
 import { MUSIC_TRACKS, resolveMusicId } from "../src/lib/table-music";
@@ -23,6 +27,23 @@ import {
 import { assignGrades, collectStyles, TIER_GRADES } from "../src/lib/tier-list";
 
 let failed = 0;
+function isBot(pick: Bot | "kaiji" | "jev"): pick is Bot {
+  return pick !== "kaiji" && pick !== "jev";
+}
+function sourceHasKey(dir: string): boolean {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (sourceHasKey(full)) return true;
+      continue;
+    }
+    if (!/\.(ts|tsx|js|mjs|css|json|md)$/.test(entry.name)) continue;
+    if (fs.readFileSync(full, "utf8").includes("apikey_")) return true;
+  }
+  return false;
+}
+
 function check(name: string, cond: boolean, detail = ""): void {
   if (cond) {
     console.log(`ok  ${name}`);
@@ -299,7 +320,7 @@ const fiveRandom = drawPracticeSeats(
   Array.from({ length: 5 }, () => ({ pool: "random" as const, botId: null })),
   [0, 0, 0, 0, 0],
 );
-const fiveIds = fiveRandom.ok ? fiveRandom.picks.map((pick) => (pick === "kaiji" ? "kaiji" : pick.id)) : [];
+const fiveIds = fiveRandom.ok ? fiveRandom.picks.map((pick) => (isBot(pick) ? pick.id : pick)) : [];
 check("five random seats are distinct players", new Set(fiveIds).size === 5, fiveIds.join(","));
 const reservedName = practice.bots[0];
 const reserved = drawPracticeSeats(
@@ -313,9 +334,9 @@ const reserved = drawPracticeSeats(
 check(
   "a named chair is not stolen by an earlier random draw",
   reserved.ok &&
-    reserved.picks[1] !== "kaiji" &&
+    isBot(reserved.picks[1]) &&
     reserved.picks[1].id === reservedName.id &&
-    reserved.picks[0] !== "kaiji" &&
+    isBot(reserved.picks[0]) &&
     reserved.picks[0].id !== reservedName.id,
 );
 const doubled = drawPracticeSeats(
@@ -344,8 +365,8 @@ const fiveTags = drawPracticeSeats(
 check(
   "five draws of one personality stay distinct",
   fiveTags.ok &&
-    fiveTags.picks.every((pick) => pick !== "kaiji" && pick.params.personality === "TAG" && !pick.playsKaiji) &&
-    new Set(fiveTags.picks.map((pick) => (pick === "kaiji" ? "" : pick.id))).size === 5,
+    fiveTags.picks.every((pick) => isBot(pick) && pick.params.personality === "TAG" && !pick.playsKaiji) &&
+    new Set(fiveTags.picks.map((pick) => (isBot(pick) ? pick.id : ""))).size === 5,
 );
 const sixNext = eloUpdates([1500, 1500, 1500, 1500, 1500, 1500], placementScores([100, 80, 20, -20, -80, -100]));
 check("six-max elo is zero-sum", Math.abs(sixNext.reduce((sum, elo) => sum + elo, 0) - 9000) < 1e-6);
@@ -682,6 +703,36 @@ void measurePace({
     paced.players === 50 && paced.blinds && paced.handsPerSec > 0 && paced.maxSpeed >= 1 && paced.maxSpeed <= ABSOLUTE_SPEED_CAP,
     `${paced.handsPerSec.toFixed(1)} hands/s at ${paced.maxSpeed}×`,
   );
+  const jevHand = new HandMachine({ n: 2, button: 0, blinds: true, rng: new Rng(3), keepLog: true });
+  const jevLegal = jevHand.legal(0);
+  const spot = {
+    toCall: jevLegal.toCall,
+    canFold: jevLegal.canFold,
+    canCheck: jevLegal.canCheck,
+    canCall: jevLegal.canCall,
+    canBet: jevLegal.canBet,
+    canRaise: jevLegal.canRaise,
+    minBetTo: jevLegal.minBetTo,
+    minRaiseTo: jevLegal.minRaiseTo,
+    maxTo: jevLegal.maxTo,
+    pot: jevHand.pot,
+    streetPut: jevHand.streetPut[0],
+  };
+  const raised = decisionFromJev(spot, { action: { choice: "raise" }, size: { choice: "pot" } });
+  check("jev raise stays inside the legal size", raised.act === "raise" && (raised.to ?? 0) >= spot.minRaiseTo && (raised.to ?? 0) < spot.maxTo);
+  check("jev does not fold when a check is free", decisionFromJev({ ...spot, toCall: 0, canFold: false, canCheck: true, canCall: false, canRaise: false, canBet: true }, { action: { choice: "fold" } }).act === "check");
+  check("jev shove maps to all-in", decisionFromJev(spot, { action: { choice: "raise" }, size: { choice: "shove" } }).act === "allin");
+  const questions = jevQuestions(jevLegal);
+  const action = questions.action as { type?: string } | undefined;
+  check("jev only asks choice questions", action?.type === "choice");
+  const state = jevState(jevHand, 0, ["Jev", "You"]);
+  const hero = state.hero as { hole: string[] };
+  check("jev sees its own cards and not a key", hero.hole.length === 2 && !JSON.stringify(state).includes("apikey_"));
+  const seated = drawPracticeSeats([], [{ pool: "jev", botId: null }, { pool: "jev", botId: null }], [0, 0]);
+  check("jev can sit with no field", seated.ok && seated.picks.length === 2 && seated.picks.every((pick) => pick === "jev"));
+  check("jev is not drawn from the field", selectPracticeBot([], "jev", 0.2) === null);
+  check("source has no pasted api key", !sourceHasKey(path.join(process.cwd(), "src")) && !sourceHasKey(path.join(process.cwd(), "server")));
+
   if (failed) {
     console.error(`${failed} failed`);
     process.exit(1);

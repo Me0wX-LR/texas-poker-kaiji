@@ -66,13 +66,15 @@ export interface TableSnap {
   matchIndex: number;
 }
 
-export type PracticePool = "random" | "kaiji" | "kaiji-chart" | Tier | `style:${string}`;
+export type PracticePool = "random" | "kaiji" | "kaiji-chart" | "jev" | Tier | `style:${string}`;
 
 export interface PracticeSeat {
   name: string;
   style: string;
   personality: string;
   usesKaiji: boolean;
+  /** TypeSafe Jev. The browser never holds the key. */
+  usesJev?: boolean;
   /** Field player id. Null when the opponent is Kaiji himself. */
   botId: string | null;
   bot: Bot | null;
@@ -117,7 +119,7 @@ export function drawPracticeSeats(
   bots: Bot[],
   requests: readonly SeatRequest[],
   rolls: readonly number[],
-): { ok: true; picks: (Bot | "kaiji")[] } | { ok: false; error: string } {
+): { ok: true; picks: (Bot | "kaiji" | "jev")[] } | { ok: false; error: string } {
   const taken = new Set<string>();
   let kaiji = false;
   for (const req of requests) {
@@ -130,7 +132,7 @@ export function drawPracticeSeats(
       kaiji = true;
     }
   }
-  const picks: (Bot | "kaiji")[] = [];
+  const picks: (Bot | "kaiji" | "jev")[] = [];
   for (let i = 0; i < requests.length; i++) {
     const req = requests[i];
     if (req.botId) {
@@ -141,6 +143,10 @@ export function drawPracticeSeats(
     }
     if (req.pool === "kaiji") {
       picks.push("kaiji");
+      continue;
+    }
+    if (req.pool === "jev") {
+      picks.push("jev");
       continue;
     }
     const pick = selectPracticeBot(bots, req.pool, rolls[i] ?? 0, taken);
@@ -159,6 +165,7 @@ export function selectPracticeBot(
   exclude?: ReadonlySet<string>,
 ): Bot | "kaiji" | null {
   if (pool === "kaiji") return "kaiji";
+  if (pool === "jev") return null;
   let choices = exclude && exclude.size > 0 ? bots.filter((bot) => !exclude.has(bot.id)) : bots;
   if (pool === "kaiji-chart") choices = choices.filter((bot) => bot.playsKaiji);
   else if (pool.startsWith("style:")) {
@@ -185,7 +192,20 @@ function copyBot(bot: Bot): Bot {
   };
 }
 
-function seatFromPick(pick: Bot | "kaiji"): PracticeSeat {
+export function jevSeat(): PracticeSeat {
+  return {
+    name: "Jev",
+    style: "Jev",
+    personality: "Reads the table",
+    usesKaiji: false,
+    usesJev: true,
+    botId: "jev",
+    bot: null,
+  };
+}
+
+function seatFromPick(pick: Bot | "kaiji" | "jev"): PracticeSeat {
+  if (pick === "jev") return jevSeat();
   if (pick === "kaiji") {
     return { name: "Kaiji", style: "Kaiji", personality: "Static chart", usesKaiji: true, botId: null, bot: null };
   }
@@ -454,6 +474,7 @@ export class SimController {
   }
 
   practiceOpponent(pool: PracticePool): PracticeSeat | null {
+    if (pool === "jev") return jevSeat();
     if (!this.field && pool !== "kaiji") return null;
     const pick = selectPracticeBot(this.field?.bots ?? [], pool, Math.random());
     return pick ? seatFromPick(pick) : null;
@@ -462,7 +483,7 @@ export class SimController {
   /** Five opponents for a human six-max table. Ratings do not move until the match is rated. */
   seatFive(requests: readonly SeatRequest[]): { seats: PracticeSeat[] | null; error: string | null } {
     if (requests.length !== 5) return { seats: null, error: "A full table needs five opponents." };
-    if (!this.field && requests.some((req) => req.pool !== "kaiji" || req.botId)) {
+    if (!this.field && requests.some((req) => (req.pool !== "kaiji" && req.pool !== "jev") || req.botId)) {
       return { seats: null, error: "The field is still loading." };
     }
     const drawn = drawPracticeSeats(
@@ -485,6 +506,7 @@ export class SimController {
    * `botId` null is Kaiji himself. His win rate and the six-max clock stay put.
    */
   rateYourMatch(botId: string | null, nets: [number, number]): PracticeRate | null {
+    if (botId === "jev") return null;
     if (this.locked || !this.field) return null;
     const bot = botId ? this.field.bots.find((item) => item.id === botId) ?? null : null;
     if (botId && !bot) return null;
@@ -511,6 +533,7 @@ export class SimController {
    * A locked run does not move. Kaiji's win rate and the six-max clock stay put.
    */
   rateYourTable(opponents: readonly { botId: string | null }[], nets: readonly number[]): TableRate | null {
+    if (opponents.some((seat) => seat.botId === "jev")) return null;
     if (this.locked || !this.field) return null;
     if (opponents.length !== 5 || nets.length !== 6) return null;
     const ids = opponents.map((seat) => seat.botId);

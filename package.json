@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -H 0.0.0.0 -p 47221",
+    "dev": "node server/dev-with-jev.mjs",
     "build": "next build",
     "lint": "eslint",
     "test:engine": "tsx scripts/test-engine.ts",

@@ -11,7 +11,9 @@ import { Slider } from "@/components/ui/slider";
 import { MIN_TEAMS, TIER_LABEL, formatChips } from "@/lib/constants";
 import type { PracticePool, SeatRequest } from "@/lib/controller";
 import { PRACTICE_GROUPS, generateField } from "@/lib/field";
+import { JevStatus } from "@/components/jev-status";
 import { positionName, type Decision } from "@/lib/hand";
+import { askJev } from "@/lib/jev";
 import type { Bot } from "@/lib/policy";
 import { decryptHoles, encryptHoles, makeSeatKeys, type SeatKeys } from "@/lib/room-crypto";
 import { openRoomBus, type RoomBus, type RoomEvent } from "@/lib/room-bus";
@@ -194,6 +196,7 @@ export function RoomTable({
   const hand = local?.hand ?? null;
   const publishRef = useRef(publish);
   const aiFault = useRef("");
+  const jevFlight = useRef<number | null>(null);
   publishRef.current = publish;
 
   useEffect(() => {
@@ -215,7 +218,32 @@ export function RoomTable({
             refresh();
           }
         } else if (live.phase === "act" && table.occupants[live.actor]?.kind === "ai") {
-          if (table.aiStep()) {
+          const actor = live.actor;
+          if (table.occupants[actor]?.usesJev) {
+            if (jevFlight.current !== actor) {
+              jevFlight.current = actor;
+              const names = table.occupants.map((seat) => seat?.name ?? "");
+              void askJev(live, actor, names).then((result) => {
+                if (jevFlight.current !== actor) return;
+                jevFlight.current = null;
+                const now = host.current;
+                if (!now?.hand || now.hand.phase !== "act" || now.hand.actor !== actor) return;
+                try {
+                  if (!now.applyAi(result.decision)) return;
+                  if (result.note) setNotice(result.note);
+                  const acted = now.hand?.lastAction ?? "";
+                  if (acted.includes("fold")) audio.current?.fold();
+                  else if (acted.includes("check")) audio.current?.check();
+                  else if (acted.includes("shove")) audio.current?.allIn();
+                  else audio.current?.chips();
+                  void publishRef.current();
+                  refresh();
+                } catch (cause) {
+                  setNotice(cause instanceof Error ? cause.message : "Jev could not act.");
+                }
+              });
+            }
+          } else if (table.aiStep()) {
             const acted = table.hand?.lastAction ?? "";
             if (acted.includes("fold")) audio.current?.fold();
             else if (acted.includes("check")) audio.current?.check();
@@ -956,6 +984,7 @@ function HostChairs({
           );
         })}
       </ul>
+      <JevStatus />
     </div>
   );
 }
@@ -1005,6 +1034,7 @@ function AiMenu({
       <div role="listbox" aria-label="Styles" className="mt-2 max-h-40 overflow-auto rounded-lg border border-[#4a382c] bg-[#221812] p-1">
         <PoolChoice label="Random player" onPick={() => onPool("random")} />
         <PoolChoice label="Kaiji" onPick={() => onPool("kaiji")} />
+        <PoolChoice label="Jev" onPick={() => onPool("jev")} />
         <PoolChoice label="Kaiji chart copies" onPick={() => onPool("kaiji-chart")} />
         {PRACTICE_GROUPS.map((group) => (
           <div key={group.tier}>
